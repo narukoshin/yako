@@ -10,9 +10,12 @@ import (
 	"github.com/narukoshin/yako/v1/server"
 )
 
+var dataDir string
+
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverStartCmd)
+	serverStartCmd.Flags().StringVarP(&dataDir, "data-dir", "d", "", "path to server data directory")
 }
 
 var serverCmd = &cobra.Command{
@@ -30,7 +33,11 @@ var serverStartCmd = &cobra.Command{
 
 func runServerStart() error {
 	// Load or initialize server config
-	cfg, err := server.LoadOrInitConfig("")
+	dir := dataDir
+	if dir == "" {
+		dir = os.Getenv("YAKO_DATA_DIR")
+	}
+	cfg, err := server.LoadOrInitConfig(dir)
 	if err != nil {
 		return fmt.Errorf("server config: %w", err)
 	}

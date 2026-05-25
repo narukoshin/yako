@@ -19,11 +19,20 @@ type Config struct {
 }
 
 func DefaultConfig() *Config {
-	home, _ := os.UserHomeDir()
+	dataDir := ""
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			dataDir = filepath.Join(filepath.Dir(resolved), ".yako-server")
+		}
+	}
+	if dataDir == "" {
+		home, _ := os.UserHomeDir()
+		dataDir = filepath.Join(home, ".yako-server")
+	}
 	return &Config{
 		Host:    "127.0.0.1",
 		Port:    8443,
-		DataDir: filepath.Join(home, ".yako-server"),
+		DataDir: dataDir,
 	}
 }
 func (c *Config) ListenAddr() string {
@@ -65,6 +74,9 @@ func LoadOrInitConfig(dataDir string) (*Config, error) {
 	if data, err := os.ReadFile(yamlPath); err == nil {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)
+		}
+		if dataDir != "" {
+			cfg.DataDir = dataDir
 		}
 		return finalizeConfig(cfg, yamlPath)
 	}
