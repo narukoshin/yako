@@ -1,0 +1,14 @@
+# Disallow everything
+*
+
+# Allow list
+!.gitignore
+!cmd/
+!config/
+!kerr/
+!server/
+!tui/
+!vault/
+!go.mod
+!go.sum
+!*.go
