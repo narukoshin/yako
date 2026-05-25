@@ -305,6 +305,12 @@ func PhraseToEntropy(phrase string) ([]byte, error) {
 	return entropy, nil
 }
 
+// VerifyRecoveryCode checks if a recovery phrase decrypts the given vault data.
+func VerifyRecoveryCode(vaultData []byte, phrase string) bool {
+	_, err := LoadRecoveryWithCodeData(vaultData, phrase)
+	return err == nil
+}
+
 func init() {
 	if len(bip39Wordlist) != 2048 {
 		panic("bip39 wordlist must have exactly 2048 words")

@@ -252,6 +252,7 @@ func init() {
 	remoteCmd.AddCommand(remoteUnbanCmd)
 	remoteCmd.AddCommand(remoteDeleteUserCmd)
 	remoteInviteCmd.Flags().IntVarP(&inviteExpiry, "expiry", "e", 24, "Invite code expiry in hours")
+	remotePullCmd.Flags().BoolVarP(&pullRecovery, "recovery", "r", false, "Use recovery phrase to decrypt vault from server (cross-machine)")
 	remoteLogoutCmd.Flags().BoolVarP(&logoutAdmin, "admin", "a", false, "Also clear cached admin session")
 }
 
@@ -297,7 +298,8 @@ var remotePullCmd = &cobra.Command{
 }
 
 var (
-	logoutAdmin bool
+	logoutAdmin  bool
+	pullRecovery bool
 )
 
 var remoteLogoutCmd = &cobra.Command{
@@ -544,6 +546,10 @@ func runRemotePull() error {
 		return fmt.Errorf("read response: %w", err)
 	}
 
+	if pullRecovery {
+		return runRemotePullRecovery(data)
+	}
+
 	if err := os.MkdirAll(config.AppDir(), 0700); err != nil {
 		return err
 	}
@@ -583,6 +589,81 @@ func runRemotePull() error {
 		}
 		cleanup = false
 		fmt.Println("Vault downloaded")
+	}
+	return nil
+}
+
+func runRemotePullRecovery(data []byte) error {
+	rc, err := loadRemoteConfig()
+	if err != nil {
+		return err
+	}
+
+	var serverEntries []vault.Entry
+	for attempt := 1; attempt <= 3; attempt++ {
+		phrase, err := readLine("Recovery phrase (12 words, space-separated): ")
+		if err != nil {
+			return err
+		}
+
+		resp, err := doRequestWithRefresh("POST", apiURL(rc.ServerURL, "/recover"),
+			[]byte(`{"phrase":"`+phrase+`"}`), rc)
+		if err != nil {
+			return fmt.Errorf("recover request: %w", err)
+		}
+
+		var result struct {
+			Status   string `json:"status"`
+			Message  string `json:"message"`
+			Attempts int    `json:"attempts"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+
+		switch result.Status {
+		case "ok":
+			serverEntries, err = vault.LoadRecoveryWithCodeData(data, phrase)
+			if err != nil {
+				return fmt.Errorf("decrypt vault: %w", err)
+			}
+			fmt.Println("(Stops pouting and looks at you with a tiny smile)")
+			goto merge
+		case "invalid":
+			if attempt < 3 {
+				fmt.Println(result.Message)
+				fmt.Println()
+			}
+		case "destroyed":
+			fmt.Println(result.Message)
+			fmt.Println("(Grabs her hair in frustration before finally letting go of the vault)")
+			return fmt.Errorf("vault destroyed on server after 3 failed recovery attempts")
+		}
+	}
+
+	return fmt.Errorf("recovery failed")
+
+merge:
+	if vault.Exists() {
+		pw, entries, err := unlockVault()
+		if err != nil {
+			return err
+		}
+
+		merged := vault.MergeEntries(entries, serverEntries)
+		if err := vault.Save([]byte(pw), merged); err != nil {
+			return fmt.Errorf("save merged vault: %w", err)
+		}
+		fmt.Printf("Vault merged (%d server + %d local = %d total)\n", len(serverEntries), len(merged)-len(serverEntries), len(merged))
+	} else {
+		pw, err := readAndConfirmPassword("New master password: ", "Confirm new master password: ")
+		if err != nil {
+			return err
+		}
+		if err := vault.Save([]byte(pw), serverEntries); err != nil {
+			return fmt.Errorf("save vault: %w", err)
+		}
+		fmt.Println("Vault recovered")
+		fmt.Println("Recovery code was NOT transferred. Run 'yako config generate-recovery' to create a new one.")
 	}
 	return nil
 }

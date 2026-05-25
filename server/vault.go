@@ -1,11 +1,15 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
+
+	vault "github.com/narukoshin/yako/v1/vault"
 )
 
 func (s *Server) handleGetVault(w http.ResponseWriter, r *http.Request) {
@@ -76,4 +80,81 @@ func (s *Server) handleDeleteVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type recoveryTracker struct {
+	mu       sync.Mutex
+	attempts map[string]int
+}
+
+func newRecoveryTracker() *recoveryTracker {
+	return &recoveryTracker{attempts: make(map[string]int)}
+}
+
+func (rt *recoveryTracker) recordAttempt(userID string) int {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.attempts[userID]++
+	return rt.attempts[userID]
+}
+
+func (rt *recoveryTracker) resetAttempts(userID string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	delete(rt.attempts, userID)
+}
+
+func (s *Server) handleRecoverVault(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(ctxKeyUserID).(string)
+
+	var req struct {
+		Phrase string `json:"phrase"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if req.Phrase == "" {
+		writeError(w, http.StatusBadRequest, "phrase required")
+		return
+	}
+
+	data, err := s.store.LoadVault(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "read vault")
+		return
+	}
+	if data == nil {
+		writeError(w, http.StatusNotFound, "no vault uploaded")
+		return
+	}
+
+	if vault.VerifyRecoveryCode(data, req.Phrase) {
+		s.recoveryTracker.resetAttempts(userID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	attempts := s.recoveryTracker.recordAttempt(userID)
+	switch attempts {
+	case 1:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":   "invalid",
+			"message":  "Tch! You're doing it wrong again, aren't you?",
+			"attempts": 1,
+		})
+	case 2:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":   "invalid",
+			"message":  "Are you trying to make me crazy or something?!",
+			"attempts": 2,
+		})
+	default:
+		s.store.DeleteVault(userID)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":   "destroyed",
+			"message":  "That's your last chance! I'm deleting your data forever!",
+			"attempts": 3,
+		})
+	}
 }

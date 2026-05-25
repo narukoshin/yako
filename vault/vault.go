@@ -346,14 +346,9 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 	return entries, nil
 }
 
-// LoadRecoveryWithCode decrypts the recovery payload using a recovery code.
+// LoadRecoveryWithCodeData decrypts the given vault data using a recovery code.
 // Works cross-machine (no machine binding).
-func LoadRecoveryWithCode(code string) ([]Entry, error) {
-	data, err := readVaultFile()
-	if err != nil {
-		return nil, err
-	}
-
+func LoadRecoveryWithCodeData(data []byte, code string) ([]Entry, error) {
 	recSalt, recoveryPayload, err := extractRecoveryPayload(data)
 	if err != nil {
 		return nil, err
@@ -375,6 +370,16 @@ func LoadRecoveryWithCode(code string) ([]Entry, error) {
 		return nil, kerr.ErrCorrupted
 	}
 	return entries, nil
+}
+
+// LoadRecoveryWithCode decrypts the local vault file using a recovery code.
+// Works cross-machine (no machine binding).
+func LoadRecoveryWithCode(code string) ([]Entry, error) {
+	data, err := readVaultFile()
+	if err != nil {
+		return nil, err
+	}
+	return LoadRecoveryWithCodeData(data, code)
 }
 
 func RegenerateRecovery(password []byte) (string, error) {

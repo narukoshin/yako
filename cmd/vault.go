@@ -86,13 +86,20 @@ func runVaultDestroy() error {
 
 	rcPath := remoteConfigPath()
 	if _, err := os.Stat(rcPath); err == nil {
-		rc, err := loadRemoteConfig()
-		if err == nil {
-			accountResp, reqErr := doRequestWithRefresh("DELETE", apiURL(rc.ServerURL, "/account"), nil, rc)
-			if reqErr == nil {
-				accountResp.Body.Close()
-				if accountResp.StatusCode == http.StatusOK {
-					fmt.Println("Server account deleted")
+		fmt.Print("Delete remote vault too? (y/n): ")
+		resp, err := readLine("")
+		if err != nil {
+			return err
+		}
+		if resp == "y" {
+			rc, err := loadRemoteConfig()
+			if err == nil {
+				accountResp, reqErr := doRequestWithRefresh("DELETE", apiURL(rc.ServerURL, "/account"), nil, rc)
+				if reqErr == nil {
+					accountResp.Body.Close()
+					if accountResp.StatusCode == http.StatusOK {
+						fmt.Println("Server account deleted")
+					}
 				}
 			}
 		}

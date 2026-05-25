@@ -18,21 +18,23 @@ const (
 )
 
 type Server struct {
-	Config     *Config
-	store      *Store
-	jwt        *JWTManager
-	mux        *http.ServeMux
-	loginLimit *RateLimiter
-	regLimit   *RateLimiter
+	Config          *Config
+	store           *Store
+	jwt             *JWTManager
+	mux             *http.ServeMux
+	loginLimit      *RateLimiter
+	regLimit        *RateLimiter
+	recoveryTracker *recoveryTracker
 }
 
 func New(cfg *Config) *Server {
 	s := &Server{
-		Config:     cfg,
-		store:      NewStore(cfg),
-		mux:        http.NewServeMux(),
-		loginLimit: NewRateLimiter(5, time.Minute),
-		regLimit:   NewRateLimiter(3, time.Minute),
+		Config:          cfg,
+		store:           NewStore(cfg),
+		mux:             http.NewServeMux(),
+		loginLimit:      NewRateLimiter(5, time.Minute),
+		regLimit:        NewRateLimiter(3, time.Minute),
+		recoveryTracker: newRecoveryTracker(),
 	}
 
 	blocked, err := s.store.LoadBlockedTokens()
@@ -51,6 +53,7 @@ func New(cfg *Config) *Server {
 	s.mux.HandleFunc("GET /api/v1/vault", s.authMiddleware(s.handleGetVault))
 	s.mux.HandleFunc("PUT /api/v1/vault", s.authMiddleware(s.handlePutVault))
 	s.mux.HandleFunc("DELETE /api/v1/vault", s.authMiddleware(s.handleDeleteVault))
+	s.mux.HandleFunc("POST /api/v1/recover", s.authMiddleware(s.handleRecoverVault))
 
 	s.mux.HandleFunc("DELETE /api/v1/account", s.authMiddleware(s.handleDeleteAccount))
 
