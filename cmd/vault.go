@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -81,6 +82,23 @@ func runVaultDestroy() error {
 
 	if err := os.Remove(config.VaultPath()); err != nil {
 		return fmt.Errorf("destroy vault: %w", err)
+	}
+
+	rcPath := remoteConfigPath()
+	if _, err := os.Stat(rcPath); err == nil {
+		rc, err := loadRemoteConfig()
+		if err == nil {
+			accountResp, reqErr := doRequestWithRefresh("DELETE", apiURL(rc.ServerURL, "/account"), nil, rc)
+			if reqErr == nil {
+				accountResp.Body.Close()
+				if accountResp.StatusCode == http.StatusOK {
+					fmt.Println("Server account deleted")
+				}
+			}
+		}
+		if err := os.Remove(rcPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove remote config: %w", err)
+		}
 	}
 
 	fmt.Println("Vault destroyed at", config.VaultPath())

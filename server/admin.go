@@ -185,3 +185,24 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "username": username})
 }
+
+func (s *Server) handleAdminDestroy(w http.ResponseWriter, r *http.Request) {
+	adminID := r.Context().Value(ctxKeyUserID).(string)
+
+	tokenStr := r.Header.Get("Authorization")
+	if len(tokenStr) > 7 {
+		tokenStr = tokenStr[7:]
+		s.jwt.BlockToken(tokenStr)
+	}
+
+	if err := s.store.Destroy(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("destroy: %v", err))
+		return
+	}
+
+	if err := s.store.SaveBlockedTokens(s.jwt.AllBlocked()); err != nil {
+		log.Printf("warning: failed to persist blocked tokens: %v", err)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "destroyed", "by": adminID})
+}

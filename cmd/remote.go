@@ -121,11 +121,12 @@ func loadAdminConfig() (*adminRemoteConfig, error) {
 
 func getAdminToken() (string, string, error) {
 	rc, err := loadAdminConfig()
-	if err == nil {
-		if time.Since(time.Unix(rc.CachedAt, 0)) < adminCacheDuration {
+	if err == nil && time.Since(time.Unix(rc.CachedAt, 0)) < adminCacheDuration {
+		if verifyAdminToken(rc.ServerURL, rc.Token) {
 			return rc.ServerURL, rc.Token, nil
 		}
 		fmt.Println("Admin session expired; please log in again")
+		os.Remove(adminRemoteConfigPath())
 	}
 
 	serverURL, err := resolveAdminServerURL()
@@ -134,6 +135,17 @@ func getAdminToken() (string, string, error) {
 	}
 
 	return adminLoginFlow(serverURL)
+}
+
+func verifyAdminToken(serverURL, token string) bool {
+	req, _ := http.NewRequest("GET", apiURL(serverURL, "/admin/users"), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func resolveAdminServerURL() (string, error) {
@@ -215,6 +227,7 @@ func init() {
 	remoteLogoutCmd.GroupID = "client"
 	remoteStatusCmd.GroupID = "client"
 	remoteDeleteVaultCmd.GroupID = "client"
+	remoteDestroyServerCmd.GroupID = "admin"
 	remoteInviteCmd.GroupID = "admin"
 	remoteInvitesCmd.GroupID = "admin"
 	remoteDeleteInviteCmd.GroupID = "admin"
@@ -230,6 +243,7 @@ func init() {
 	remoteCmd.AddCommand(remoteLogoutCmd)
 	remoteCmd.AddCommand(remoteStatusCmd)
 	remoteCmd.AddCommand(remoteDeleteVaultCmd)
+	remoteCmd.AddCommand(remoteDestroyServerCmd)
 	remoteCmd.AddCommand(remoteInviteCmd)
 	remoteCmd.AddCommand(remoteInvitesCmd)
 	remoteCmd.AddCommand(remoteDeleteInviteCmd)
@@ -645,6 +659,49 @@ func runRemoteDeleteVault() error {
 	return nil
 }
 
+func runRemoteDestroyServer() error {
+	serverURL, token, err := getAdminToken()
+	if err != nil {
+		return err
+	}
+
+	fmt.Print("This will delete ALL users, vaults, and data from the server. Are you sure? (y/n): ")
+	resp, err := readLine("")
+	if err != nil {
+		return err
+	}
+	if resp != "y" {
+		fmt.Println("Cancelled")
+		return nil
+	}
+
+	fmt.Print("Type the server URL to confirm: ")
+	confirmURL, err := readLine("")
+	if err != nil {
+		return err
+	}
+	if confirmURL != serverURL {
+		fmt.Println("Server URL does not match. Cancelled.")
+		return nil
+	}
+
+	resp2, err := doRequest("DELETE", apiURL(serverURL, "/admin/destroy"), token, nil)
+	if err != nil {
+		return fmt.Errorf("destroy server: %w", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		return kerr.CleanHTTPError("destroy server", resp2.StatusCode, body)
+	}
+
+	os.Remove(adminRemoteConfigPath())
+
+	fmt.Println("Server destroyed. All data has been wiped.")
+	return nil
+}
+
 // --- Admin commands ---
 
 var remoteDeleteVaultCmd = &cobra.Command{
@@ -653,6 +710,14 @@ var remoteDeleteVaultCmd = &cobra.Command{
 	Short:   "Delete your vault from the server",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		return runRemoteDeleteVault()
+	},
+}
+
+var remoteDestroyServerCmd = &cobra.Command{
+	Use:   "destroy-server",
+	Short: "Wipe all data (users, vaults, invites) from the server",
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return runRemoteDestroyServer()
 	},
 }
 

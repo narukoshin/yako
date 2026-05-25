@@ -596,6 +596,26 @@ func (s *Store) SaveBlockedTokens(hashes []string) error {
 	return s.writeFile(s.Config.BlockedTokensPath(), data)
 }
 
+func (s *Store) Destroy() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dir := s.Config.DataDir
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read data dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.Name() == "config.yml" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("remove %s: %w", e.Name(), err)
+		}
+	}
+	return nil
+}
+
 func hashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 13)
 	if err != nil {

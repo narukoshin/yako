@@ -61,6 +61,7 @@ func New(cfg *Config) *Server {
 	s.mux.HandleFunc("PUT /api/v1/admin/users/{username}/ban", s.adminMiddleware(s.handleAdminBanUser))
 	s.mux.HandleFunc("PUT /api/v1/admin/users/{username}/unban", s.adminMiddleware(s.handleAdminUnbanUser))
 	s.mux.HandleFunc("DELETE /api/v1/admin/users/{username}", s.adminMiddleware(s.handleAdminDeleteUser))
+	s.mux.HandleFunc("DELETE /api/v1/admin/destroy", s.adminMiddleware(s.handleAdminDestroy))
 
 	return s
 }

@@ -1,6 +1,8 @@
 package vault
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -14,10 +16,20 @@ import (
 )
 
 const (
-	headerFixedLen  = 73
-	payloadLenSize  = 4
-	recoveryLenSize = 4
+	oldHeaderFixedLen = 73
+	headerFixedLen    = 121
+	payloadLenSize    = 4
+	recoveryLenSize   = 4
+	verifySaltLen     = 16
+	verifyHashLen     = 32
 )
+
+func headerSize(data []byte) int {
+	if len(data) >= headerFixedLen {
+		return headerFixedLen
+	}
+	return oldHeaderFixedLen
+}
 
 type recoveryEnvelope struct {
 	CodeEnvelope    []byte `json:"c"`
@@ -70,17 +82,21 @@ func lockoutBytes(lo *kerr.LockoutState) []byte {
 	return buf
 }
 
-func buildHeader(mainSalt, recSalt []byte, lo *kerr.LockoutState) []byte {
+func buildHeader(mainSalt, recSalt []byte, lo *kerr.LockoutState, verifySalt, verifyHash []byte) []byte {
 	buf := make([]byte, headerFixedLen)
 	copy(buf[0:16], mainSalt)
 	copy(buf[16:32], recSalt)
 	copy(buf[32:73], lockoutBytes(lo))
+	if verifySalt != nil && verifyHash != nil {
+		copy(buf[73:89], verifySalt)
+		copy(buf[89:121], verifyHash)
+	}
 	return buf
 }
 
-func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, err error) {
-	if len(data) < headerFixedLen {
-		return nil, nil, nil, kerr.ErrCorrupted
+func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, verifySalt, verifyHash []byte, err error) {
+	if len(data) < oldHeaderFixedLen {
+		return nil, nil, nil, nil, nil, kerr.ErrCorrupted
 	}
 	mainSalt = data[0:16]
 	recSalt = data[16:32]
@@ -90,7 +106,11 @@ func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, 
 		HMAC:        data[41:73],
 	}
 	if !kerr.VerifyLockout(lo, config.MachineSecret()) {
-		return nil, nil, nil, kerr.ErrCorrupted
+		return nil, nil, nil, nil, nil, kerr.ErrCorrupted
+	}
+	if len(data) >= headerFixedLen {
+		verifySalt = data[73:89]
+		verifyHash = data[89:121]
 	}
 	return
 }
@@ -100,19 +120,20 @@ func readVaultFile() ([]byte, error) {
 	if err != nil {
 		return nil, kerr.ErrNoVault
 	}
-	if len(data) < headerFixedLen {
+	if len(data) < oldHeaderFixedLen {
 		return nil, kerr.ErrCorrupted
 	}
 	return data, nil
 }
 
 func extractRecoveryPayload(data []byte) (recSalt []byte, payload []byte, err error) {
-	if len(data) < headerFixedLen+payloadLenSize {
+	hs := headerSize(data)
+	if len(data) < hs+payloadLenSize {
 		return nil, nil, kerr.ErrCorrupted
 	}
 	recSalt = data[16:32]
-	payloadLen := binary.BigEndian.Uint32(data[headerFixedLen : headerFixedLen+payloadLenSize])
-	recoveryOffset := headerFixedLen + payloadLenSize + int(payloadLen)
+	payloadLen := binary.BigEndian.Uint32(data[hs : hs+payloadLenSize])
+	recoveryOffset := hs + payloadLenSize + int(payloadLen)
 	if recoveryOffset+recoveryLenSize > len(data) {
 		return nil, nil, kerr.ErrCorrupted
 	}
@@ -242,7 +263,16 @@ func saveWith(password []byte, entries []Entry, code string) error {
 		}
 	}
 
-	header := buildHeader(mainSalt, recSalt, &kerr.LockoutState{})
+	verifySalt, err := ck.GenerateSalt()
+	if err != nil {
+		return fmt.Errorf("save vault: %w", err)
+	}
+	mac := hmac.New(sha256.New, password)
+	mac.Write(verifySalt)
+	mac.Write(plaintext)
+	verifyHash := mac.Sum(nil)
+
+	header := buildHeader(mainSalt, recSalt, &kerr.LockoutState{}, verifySalt, verifyHash)
 
 	buf := make([]byte, 0, headerFixedLen+payloadLenSize+len(payload)+recoveryLenSize+len(recovery))
 	buf = append(buf, header...)
@@ -267,7 +297,7 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 		return nil, kerr.ErrNoVault
 	}
 
-	mainSalt, _, lo, err := parseHeader(data)
+	mainSalt, _, lo, verifySalt, verifyHash, err := parseHeader(data)
 	if err != nil {
 		return nil, err
 	}
@@ -276,11 +306,12 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 		return nil, err
 	}
 
-	if len(data) < headerFixedLen+payloadLenSize {
+	hs := headerSize(data)
+	if len(data) < hs+payloadLenSize {
 		return nil, kerr.ErrCorrupted
 	}
-	payloadLen := binary.BigEndian.Uint32(data[headerFixedLen : headerFixedLen+payloadLenSize])
-	payloadStart := headerFixedLen + payloadLenSize
+	payloadLen := binary.BigEndian.Uint32(data[hs : hs+payloadLenSize])
+	payloadStart := hs + payloadLenSize
 	payloadEnd := payloadStart + int(payloadLen)
 	if payloadEnd > len(data) {
 		return nil, kerr.ErrCorrupted
@@ -293,6 +324,15 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 		copy(data[32:73], lockoutBytes(lo))
 		writeAtomic(config.VaultPath(), data)
 		return nil, kerr.ErrWrongPassword
+	}
+
+	if verifySalt != nil && verifyHash != nil {
+		mac := hmac.New(sha256.New, password)
+		mac.Write(verifySalt)
+		mac.Write(plaintext)
+		if !hmac.Equal(mac.Sum(nil), verifyHash) {
+			return nil, kerr.ErrCorrupted
+		}
 	}
 
 	kerr.ResetLockout(lo)

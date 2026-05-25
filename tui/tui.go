@@ -202,6 +202,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case accountVerifyMsg:
+		if msg.valid {
+			if msg.token != "" {
+				m.remoteToken = msg.token
+				m.saveRemoteToken()
+			}
+		} else {
+			m.remoteURL = ""
+			m.remoteToken = ""
+			m.remoteRefreshToken = ""
+			m.remoteUser = ""
+			os.Remove(config.AppDir() + "/remote")
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.screen == screenLock {
 			return m.updateLock(msg)
@@ -272,6 +287,9 @@ func (m model) updateLock(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.entryList.SetItems(items)
 		m.screen = screenList
+		if m.remoteToken != "" {
+			return m, doVerifyAccount(m.remoteURL, m.remoteToken, m.remoteRefreshToken)
+		}
 		return m, nil
 	}
 
@@ -830,15 +848,6 @@ func (m model) updateRemoteHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.remoteMsg = successStyle.Render("Logged out")
 			}
 			return m, nil
-		case "s":
-			if m.remoteToken != "" {
-				if err := m.saveRemoteToken(); err != nil {
-					m.remoteMsg = errStyle.Render(err.Error())
-				} else {
-					m.remoteMsg = successStyle.Render("Token saved to disk")
-				}
-			}
-			return m, nil
 		case "d":
 			if m.remoteToken == "" {
 				m.remoteMsg = "not connected; login first"
@@ -967,7 +976,7 @@ func (m model) viewRemoteHome() string {
 		b.WriteString(fieldStyle.Render("User:   "))
 		b.WriteString(valueStyle.Render(m.remoteUser))
 		b.WriteString("\n\n")
-		b.WriteString(helpStyle.Render(" [p] Push vault  [g] Pull vault  [d] Delete vault  [o] Logout  [s] Save token"))
+		b.WriteString(helpStyle.Render(" [p] Push vault  [g] Pull vault  [d] Delete vault  [o] Logout"))
 	}
 
 	b.WriteString("\n\n")
@@ -1228,6 +1237,11 @@ type healthCheckMsg struct {
 	err       string
 }
 
+type accountVerifyMsg struct {
+	valid bool
+	token string // new token if refreshed
+}
+
 func doHealthCheck(url string) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := http.Get(apiURL(url, "/health"))
@@ -1239,6 +1253,41 @@ func doHealthCheck(url string) tea.Cmd {
 			return healthCheckMsg{reachable: true}
 		}
 		return healthCheckMsg{err: fmt.Sprintf("server unhealthy (HTTP %d)", resp.StatusCode)}
+	}
+}
+
+func doVerifyAccount(url, token, refreshToken string) tea.Cmd {
+	return func() tea.Msg {
+		req, _ := http.NewRequest("HEAD", apiURL(url, "/vault"), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return accountVerifyMsg{false, ""}
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+			return accountVerifyMsg{true, ""}
+		}
+
+		if resp.StatusCode == http.StatusUnauthorized && refreshToken != "" {
+			body, _ := json.Marshal(map[string]string{"refresh_token": refreshToken})
+			refreshResp, err := http.Post(apiURL(url, "/auth/refresh"), "application/json", bytes.NewReader(body))
+			if err != nil {
+				return accountVerifyMsg{false, ""}
+			}
+			defer refreshResp.Body.Close()
+			if refreshResp.StatusCode == http.StatusOK {
+				var result struct {
+					Token string `json:"token"`
+				}
+				if json.NewDecoder(refreshResp.Body).Decode(&result) == nil {
+					return accountVerifyMsg{true, result.Token}
+				}
+			}
+		}
+
+		return accountVerifyMsg{false, ""}
 	}
 }
 
