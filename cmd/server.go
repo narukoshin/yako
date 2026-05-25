@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -10,12 +11,18 @@ import (
 	"github.com/narukoshin/yako/v1/server"
 )
 
-var dataDir string
+var (
+	dataDir string
+	port    int
+	host    string
+)
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverStartCmd)
 	serverStartCmd.Flags().StringVarP(&dataDir, "data-dir", "d", "", "path to server data directory")
+	serverStartCmd.Flags().IntVarP(&port, "port", "p", 0, "server listening port")
+	serverStartCmd.Flags().StringVarP(&host, "host", "H", "127.0.0.1", "server listening host")
 }
 
 var serverCmd = &cobra.Command{
@@ -26,12 +33,12 @@ var serverCmd = &cobra.Command{
 var serverStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the HTTP sync server",
-	RunE: func(_ *cobra.Command, _ []string) error {
-		return runServerStart()
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runServerStart(cmd)
 	},
 }
 
-func runServerStart() error {
+func runServerStart(cmd *cobra.Command) error {
 	// Load or initialize server config
 	dir := dataDir
 	if dir == "" {
@@ -40,6 +47,24 @@ func runServerStart() error {
 	cfg, err := server.LoadOrInitConfig(dir)
 	if err != nil {
 		return fmt.Errorf("server config: %w", err)
+	}
+
+	if port != 0 {
+		cfg.Port = port
+	} else if envPort := os.Getenv("YAKO_PORT"); envPort != "" {
+		p, err := strconv.Atoi(envPort)
+		if err != nil {
+			return fmt.Errorf("invalid YAKO_PORT: %w", err)
+		}
+		cfg.Port = p
+	}
+
+	if cmd.Flags().Lookup("host").Changed {
+		cfg.Host = host
+	} else if envHost := os.Getenv("YAKO_HOST"); envHost != "" {
+		cfg.Host = envHost
+	} else {
+		cfg.Host = "127.0.0.1"
 	}
 
 	// Create server instance

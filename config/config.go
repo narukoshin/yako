@@ -19,7 +19,7 @@ const configSaltLen = 16
 
 const (
 	// VERSION is the current version of the application.
-	VERSION	     = "v0.2.2-beta"
+	VERSION	     = "v0.2.3-beta"
 
 	AppName      = "yako"
 	VaultFile    = "vault"
