@@ -31,6 +31,7 @@ func GeneratePassword(length int) (string, error) {
 type entryJSON struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+	Folder   string `json:"folder,omitempty"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password"`
 	URL      string `json:"url,omitempty"`
@@ -42,6 +43,7 @@ type entryJSON struct {
 type Entry struct {
 	ID       string
 	Name     string
+	Folder   string
 	Username string
 	Password []byte
 	URL      string
@@ -54,6 +56,7 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(entryJSON{
 		ID:       e.ID,
 		Name:     e.Name,
+		Folder:   e.Folder,
 		Username: e.Username,
 		Password: string(e.Password),
 		URL:      e.URL,
@@ -70,6 +73,7 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	}
 	e.ID = v.ID
 	e.Name = v.Name
+	e.Folder = v.Folder
 	e.Username = v.Username
 	e.Password = []byte(v.Password)
 	e.URL = v.URL
@@ -85,11 +89,12 @@ func (e *Entry) Zero() {
 	}
 }
 
-func NewEntry(name, username, password, url, notes string) Entry {
+func NewEntry(name, username, password, url, notes, folder string) Entry {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return Entry{
 		ID:       name,
 		Name:     name,
+		Folder:   folder,
 		Username: username,
 		Password: []byte(password),
 		URL:      url,

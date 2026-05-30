@@ -57,8 +57,8 @@ func TestSaveAndLoadEntries(t *testing.T) {
 	}
 
 	entries := []Entry{
-		NewEntry("example.com", "user@ex.com", "s3cret!", "https://example.com", "my account"),
-		NewEntry("github.com", "enko", "gh-token-123", "https://github.com", ""),
+		NewEntry("example.com", "user@ex.com", "s3cret!", "https://example.com", "my account", ""),
+		NewEntry("github.com", "enko", "gh-token-123", "https://github.com", "", ""),
 	}
 
 	if err := Save(password, entries); err != nil {
@@ -137,7 +137,7 @@ func TestMultipleSavePreservesEntries(t *testing.T) {
 	}
 
 	entries := []Entry{
-		NewEntry("site1", "u1", "p1", "", ""),
+		NewEntry("site1", "u1", "p1", "", "", ""),
 	}
 
 	if err := Save(password, entries); err != nil {
@@ -145,8 +145,8 @@ func TestMultipleSavePreservesEntries(t *testing.T) {
 	}
 
 	entries2 := []Entry{
-		NewEntry("site1", "u1", "p1", "", ""),
-		NewEntry("site2", "u2", "p2", "", ""),
+		NewEntry("site1", "u1", "p1", "", "", ""),
+		NewEntry("site2", "u2", "p2", "", "", ""),
 	}
 
 	if err := Save(password, entries2); err != nil {

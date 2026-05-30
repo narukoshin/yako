@@ -94,7 +94,7 @@ func TestVaultBinaryFormat(t *testing.T) {
 	}
 
 	entries := []Entry{
-		NewEntry("example.com", "user", "pass", "", ""),
+		NewEntry("example.com", "user", "pass", "", "", ""),
 	}
 	if err := Save([]byte("test-pw"), entries); err != nil {
 		t.Fatalf("Save: %v", err)

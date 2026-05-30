@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,6 +40,51 @@ const (
 	formEdit
 )
 
+type formFieldDef struct {
+	label       string
+	placeholder string
+	isPassword  bool
+	addOnly     bool
+	get         func(vault.Entry) string
+	set         func(*vault.Entry, string)
+}
+
+var formFields = []formFieldDef{
+	{label: "Name", placeholder: "entry name",
+		get: func(e vault.Entry) string { return e.Name },
+		set: func(e *vault.Entry, v string) { e.Name = v }},
+	{label: "Username", placeholder: "username",
+		get: func(e vault.Entry) string { return e.Username },
+		set: func(e *vault.Entry, v string) { e.Username = v }},
+	{label: "Password", placeholder: "password", isPassword: true,
+		get: func(e vault.Entry) string { return string(e.Password) },
+		set: func(e *vault.Entry, v string) { e.Password = []byte(v) }},
+	{label: "URL", placeholder: "https://",
+		get: func(e vault.Entry) string { return e.URL },
+		set: func(e *vault.Entry, v string) { e.URL = v }},
+	{label: "Notes", placeholder: "notes",
+		get: func(e vault.Entry) string { return e.Notes },
+		set: func(e *vault.Entry, v string) { e.Notes = v }},
+	{label: "Folder", placeholder: "folder",
+		get: func(e vault.Entry) string { return e.Folder },
+		set: func(e *vault.Entry, v string) { e.Folder = v }},
+}
+
+type folderItem struct {
+	name  string
+	count int
+}
+
+func (i folderItem) Title() string       { return "[ " + i.name + " ]" }
+func (i folderItem) Description() string { return fmt.Sprintf("%d entries", i.count) }
+func (i folderItem) FilterValue() string { return i.name }
+
+type backItem struct{}
+
+func (i backItem) Title() string       { return ".." }
+func (i backItem) Description() string { return "back to main screen" }
+func (i backItem) FilterValue() string { return "" }
+
 type entryItem struct {
 	entry vault.Entry
 }
@@ -49,12 +95,16 @@ func (i entryItem) Description() string {
 	if len(updated) > 10 {
 		updated = updated[:10]
 	}
+	var parts []string
 	if i.entry.Username != "" {
-		return i.entry.Username + " · " + updated
+		parts = append(parts, i.entry.Username)
 	}
-	return updated
+	parts = append(parts, updated)
+	return strings.Join(parts, " · ")
 }
-func (i entryItem) FilterValue() string { return i.entry.Name + " " + i.entry.Username }
+func (i entryItem) FilterValue() string {
+	return i.entry.Name + " " + i.entry.Username + " " + i.entry.Folder
+}
 
 type model struct {
 	screen screen
@@ -76,14 +126,18 @@ type model struct {
 	formFocused int
 	formEditIdx int
 
-	confirmDelete bool
-	confirmMsg    string
+	confirmDelete    bool
+	confirmMsg       string
+	deleteFolder     bool
+	deleteFolderName string
 
 	showPassword bool
 	detailMsg    string
 
 	searchInput textinput.Model
 	showSearch  bool
+
+	folderFilter string
 
 	remoteURL             string
 	remoteToken           string
@@ -172,10 +226,11 @@ func initialModel() model {
 	l.DisableQuitKeybindings()
 
 	m := model{
-		screen:      screenLock,
-		lockInput:   ti,
-		entryList:   l,
-		searchInput: si,
+		screen:       screenLock,
+		lockInput:    ti,
+		entryList:    l,
+		searchInput:  si,
+		folderFilter: "",
 	}
 
 	m.remoteURL, m.remoteToken, m.remoteRefreshToken, m.remoteUser = loadRemoteToken()
@@ -281,11 +336,7 @@ func (m model) updateLock(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.entries = entries
 		m.lockErrMsg = ""
 
-		items := make([]list.Item, len(entries))
-		for i, e := range entries {
-			items[i] = entryItem{entry: e}
-		}
-		m.entryList.SetItems(items)
+		m = m.rebuildList()
 		m.screen = screenList
 		if m.remoteToken != "" {
 			return m, doVerifyAccount(m.remoteURL, m.remoteToken, m.remoteRefreshToken)
@@ -324,10 +375,16 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tea.KeyEscape:
-		m.entryList.ResetFilter()
 		if m.showSearch {
 			m.showSearch = false
-			m.entryList.SetFilteringEnabled(false)
+			m.searchInput.Blur()
+			m.searchInput.SetValue("")
+			m = m.rebuildList()
+			return m, nil
+		}
+		if m.folderFilter != "" {
+			m.folderFilter = ""
+			m = m.rebuildList()
 			return m, nil
 		}
 		return m, nil
@@ -346,18 +403,31 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !m.showSearch {
 				m.showSearch = true
 				m.searchInput.Focus()
-				m.entryList.SetFilteringEnabled(true)
+				m.searchInput.SetValue("")
+				m = m.applySearchFilter()
 				return m, nil
 			}
 		case "d":
 			if !m.showSearch {
+				items := m.entryList.Items()
 				selected := m.entryList.Index()
-				if selected >= 0 && selected < len(m.entries) {
-					name := m.entries[selected].Name
+				if selected >= 0 && selected < len(items) {
 					m.confirmDelete = true
-					m.selectedIdx = selected
-					m.confirmMsg = fmt.Sprintf("Delete %q? (y/n)", name)
-					return m, nil
+					switch item := items[selected].(type) {
+					case entryItem:
+						idx := m.findEntryIdx(item.entry.Name)
+						if idx >= 0 {
+							m.deleteFolder = false
+							m.selectedIdx = idx
+							m.confirmMsg = fmt.Sprintf("Delete %q? (y/n)", item.entry.Name)
+							return m, nil
+						}
+					case folderItem:
+						m.deleteFolder = true
+						m.deleteFolderName = item.name
+						m.confirmMsg = fmt.Sprintf("Delete folder %q and all its entries? (y/n)", item.name)
+						return m, nil
+					}
 				}
 			}
 		case "r":
@@ -375,33 +445,37 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		if m.showSearch {
 			m.showSearch = false
-			m.entryList.SetFilteringEnabled(false)
 			m.searchInput.Blur()
 			return m, nil
 		}
+		items := m.entryList.Items()
 		selected := m.entryList.Index()
-		if selected >= 0 && selected < len(m.entries) {
-			m.selectedIdx = selected
-			m.screen = screenDetail
-			return m, nil
-		}
-
-	case tea.KeyBackspace, tea.KeyDelete:
-		if m.showSearch {
-			break
-		}
-		selected := m.entryList.Index()
-		if selected >= 0 && selected < len(m.entries) {
-			name := m.entries[selected].Name
-			m.confirmDelete = true
-			m.selectedIdx = selected
-			m.confirmMsg = fmt.Sprintf("Delete %q? (y/n)", name)
-			return m, nil
+		if selected >= 0 && selected < len(items) {
+			switch item := items[selected].(type) {
+			case entryItem:
+				idx := m.findEntryIdx(item.entry.Name)
+				if idx >= 0 {
+					m.selectedIdx = idx
+					m.screen = screenDetail
+					return m, nil
+				}
+			case folderItem:
+				m.folderFilter = item.name
+				m = m.rebuildList()
+				return m, nil
+			case backItem:
+				m.folderFilter = ""
+				m = m.rebuildList()
+				return m, nil
+			}
 		}
 	}
 
 	if m.showSearch {
-		_, cmd := m.entryList.Update(msg)
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		m.entryList, _ = m.entryList.Update(msg)
+		m = m.applySearchFilter()
 		return m, cmd
 	}
 
@@ -411,11 +485,16 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) viewList() string {
-	helpText := helpStyle.Render(" [a] add  [/] search  [r] remote  [d] delete  [q] quit  [↑/↓]  [enter] view")
+	helpText := helpStyle.Render(" [a] add  [/] search  [r] remote  [d] delete  [q] quit  [↑/↓]  [enter] open")
 
 	confirm := ""
 	if m.confirmDelete {
 		confirm = "\n" + errStyle.Render(m.confirmMsg)
+	}
+
+	folderBar := ""
+	if m.folderFilter != "" {
+		folderBar = infoStyle.Render("[ "+m.folderFilter+" ]") + "  " + subtleStyle.Render("[esc] back")
 	}
 
 	if m.showSearch {
@@ -423,6 +502,7 @@ func (m model) viewList() string {
 			m.entryList.View(),
 			"\n",
 			m.searchInput.View(),
+			folderBar,
 			helpText,
 			confirm,
 		)
@@ -430,6 +510,7 @@ func (m model) viewList() string {
 
 	return lipgloss.JoinVertical(lipgloss.Top,
 		m.entryList.View(),
+		folderBar,
 		helpText,
 		confirm,
 	)
@@ -511,6 +592,11 @@ func (m model) viewDetail() string {
 		b.WriteString(valueStyle.Render(e.Notes))
 		b.WriteString("\n")
 	}
+	if e.Folder != "" {
+		b.WriteString(fieldStyle.Render("Folder:    "))
+		b.WriteString(infoStyle.Render(e.Folder))
+		b.WriteString("\n")
+	}
 
 	if e.Updated != "" {
 		updatedAt, err := time.Parse(time.RFC3339, e.Updated)
@@ -544,6 +630,17 @@ func (m model) viewDetail() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
 
+func (m model) activeFormFields() []formFieldDef {
+	var fields []formFieldDef
+	for _, f := range formFields {
+		if m.formMode == formEdit && f.addOnly {
+			continue
+		}
+		fields = append(fields, f)
+	}
+	return fields
+}
+
 func (m model) initForm(mode formMode, entryIdx int) model {
 	m.screen = screenForm
 	m.formMode = mode
@@ -554,37 +651,30 @@ func (m model) initForm(mode formMode, entryIdx int) model {
 		existing = m.entries[entryIdx]
 	}
 
-	var numFields int
-	var placeholders, values []string
-	var pwFieldIdx int
-
-	if mode == formAdd {
-		numFields = 5
-		placeholders = []string{"entry name", "username", "password", "https://", "notes"}
-		values = []string{"", "", "", "", ""}
-		pwFieldIdx = 2
-	} else {
-		numFields = 4
-		placeholders = []string{"username", "password", "https://", "notes"}
-		values = []string{existing.Username, string(existing.Password), existing.URL, existing.Notes}
-		pwFieldIdx = 1
-	}
-
-	inputs := make([]textinput.Model, numFields)
-	for i := range inputs {
+	inputs := []textinput.Model{}
+	inputIdx := 0
+	for _, f := range formFields {
+		if mode == formEdit && f.addOnly {
+			continue
+		}
 		ti := textinput.New()
-		ti.Placeholder = placeholders[i]
-		ti.SetValue(values[i])
+		ti.Placeholder = f.placeholder
 		ti.CharLimit = 256
 		ti.Width = 40
-		if i == pwFieldIdx {
+		if f.isPassword {
 			ti.EchoMode = textinput.EchoPassword
 			ti.EchoCharacter = '•'
 		}
-		if i == 0 {
+		if mode == formEdit {
+			ti.SetValue(f.get(existing))
+		} else if f.label == "Folder" && m.folderFilter != "" {
+			ti.SetValue(m.folderFilter)
+		}
+		if inputIdx == 0 {
 			ti.Focus()
 		}
-		inputs[i] = ti
+		inputs = append(inputs, ti)
+		inputIdx++
 	}
 
 	m.formInputs = inputs
@@ -618,31 +708,36 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		fields := m.activeFormFields()
+		pwIdx := -1
+		for i, f := range fields {
+			if f.isPassword {
+				pwIdx = i
+				break
+			}
+		}
+
+		if m.formMode == formAdd && m.formInputs[0].Value() == "" {
+			break
+		}
+		if pwIdx >= 0 && m.formInputs[pwIdx].Value() == "" {
+			break
+		}
+
 		if m.formMode == formAdd {
-			name := m.formInputs[0].Value()
-			if name == "" {
-				break
+			entry := vault.Entry{}
+			entry.Created = time.Now().UTC().Format(time.RFC3339)
+			entry.Updated = entry.Created
+			for i, f := range fields {
+				f.set(&entry, m.formInputs[i].Value())
 			}
-			if m.formInputs[2].Value() == "" {
-				break
-			}
-			entry := vault.NewEntry(
-				name,
-				m.formInputs[1].Value(),
-				m.formInputs[2].Value(),
-				m.formInputs[3].Value(),
-				m.formInputs[4].Value(),
-			)
+			entry.ID = entry.Name
 			m.entries = append(m.entries, entry)
 		} else {
-			if m.formInputs[1].Value() == "" {
-				break
-			}
 			idx := m.formEditIdx
-			m.entries[idx].Username = m.formInputs[0].Value()
-			m.entries[idx].Password = []byte(m.formInputs[1].Value())
-			m.entries[idx].URL = m.formInputs[2].Value()
-			m.entries[idx].Notes = m.formInputs[3].Value()
+			for i, f := range fields {
+				f.set(&m.entries[idx], m.formInputs[i].Value())
+			}
 			m.entries[idx].Updated = time.Now().UTC().Format(time.RFC3339)
 		}
 
@@ -652,11 +747,7 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		items := make([]list.Item, len(m.entries))
-		for i, e := range m.entries {
-			items[i] = entryItem{entry: e}
-		}
-		m.entryList.SetItems(items)
+		m = m.rebuildList()
 
 		if m.formMode == formAdd {
 			m.screen = screenList
@@ -667,13 +758,15 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlG:
-		pwIdx := 2
-		if m.formMode == formEdit {
-			pwIdx = 1
-		}
-		pw, err := vault.GeneratePassword(24)
-		if err == nil {
-			m.formInputs[pwIdx].SetValue(pw)
+		fields := m.activeFormFields()
+		for i, f := range fields {
+			if f.isPassword {
+				pw, err := vault.GeneratePassword(24)
+				if err == nil {
+					m.formInputs[i].SetValue(pw)
+				}
+				break
+			}
 		}
 		return m, nil
 	}
@@ -693,14 +786,9 @@ func (m model) viewForm() string {
 	}
 	b.WriteString("\n\n")
 
-	var labelNames []string
-	if m.formMode == formAdd {
-		labelNames = []string{"Name", "Username", "Password", "URL", "Notes"}
-	} else {
-		labelNames = []string{"Username", "Password", "URL", "Notes"}
-	}
+	fields := m.activeFormFields()
 	for i := range m.formInputs {
-		label := fieldStyle.Render(labelNames[i] + ":")
+		label := fieldStyle.Render(fields[i].label + ":")
 		input := m.formInputs[i].View()
 		b.WriteString(fmt.Sprintf("%s %s\n", label, input))
 	}
@@ -711,34 +799,137 @@ func (m model) viewForm() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
 
+func (m model) findEntryIdx(name string) int {
+	for i, e := range m.entries {
+		if e.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m model) buildItems() []list.Item {
+	if m.folderFilter != "" {
+		filtered := []vault.Entry{}
+		for _, e := range m.entries {
+			if e.Folder == m.folderFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		sort.Slice(filtered, func(i, j int) bool {
+			return filtered[i].Name < filtered[j].Name
+		})
+		items := make([]list.Item, len(filtered)+1)
+		items[0] = backItem{}
+		for i, e := range filtered {
+			items[i+1] = entryItem{entry: e}
+		}
+		return items
+	}
+
+	folders := []string{}
+	seen := map[string]bool{}
+	for _, e := range m.entries {
+		if e.Folder != "" && !seen[e.Folder] {
+			seen[e.Folder] = true
+			folders = append(folders, e.Folder)
+		}
+	}
+	sort.Strings(folders)
+
+	folderCounts := map[string]int{}
+	for _, e := range m.entries {
+		if e.Folder != "" {
+			folderCounts[e.Folder]++
+		}
+	}
+
+	items := []list.Item{}
+	for _, f := range folders {
+		items = append(items, folderItem{name: f, count: folderCounts[f]})
+	}
+
+	unfiled := []vault.Entry{}
+	for _, e := range m.entries {
+		if e.Folder == "" {
+			unfiled = append(unfiled, e)
+		}
+	}
+	sort.Slice(unfiled, func(i, j int) bool {
+		return unfiled[i].Name < unfiled[j].Name
+	})
+	for _, e := range unfiled {
+		items = append(items, entryItem{entry: e})
+	}
+	return items
+}
+
+func (m model) rebuildList() model {
+	if m.showSearch {
+		return m.applySearchFilter()
+	}
+	items := m.buildItems()
+	m.entryList.SetItems(items)
+	m.entryList.ResetFilter()
+	return m
+}
+
+func (m model) applySearchFilter() model {
+	query := strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
+	all := m.buildItems()
+
+	if query == "" {
+		m.entryList.SetItems(all)
+		m.entryList.ResetFilter()
+		return m
+	}
+
+	filtered := []list.Item{}
+	for _, item := range all {
+		fv := strings.ToLower(item.FilterValue())
+		if strings.Contains(fv, query) {
+			filtered = append(filtered, item)
+		}
+	}
+	m.entryList.SetItems(filtered)
+	m.entryList.ResetFilter()
+	return m
+}
+
 func (m model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyRunes:
 		if string(msg.Runes) == "y" {
-			m.entries = append(m.entries[:m.selectedIdx], m.entries[m.selectedIdx+1:]...)
+			if m.deleteFolder {
+				filtered := []vault.Entry{}
+				for _, e := range m.entries {
+					if e.Folder != m.deleteFolderName {
+						filtered = append(filtered, e)
+					}
+				}
+				m.entries = filtered
+			} else {
+				m.entries = append(m.entries[:m.selectedIdx], m.entries[m.selectedIdx+1:]...)
+			}
 			if err := vault.Save(m.masterPassword, m.entries); err != nil {
 				m.lockErrMsg = err.Error()
 				m.screen = screenLock
 				return m, nil
 			}
-			items := make([]list.Item, len(m.entries))
-			for i, e := range m.entries {
-				items[i] = entryItem{entry: e}
-			}
-			m.entryList.SetItems(items)
+			m = m.rebuildList()
 			m.confirmDelete = false
+			m.deleteFolder = false
 			m.screen = screenList
 			return m, nil
 		}
 		fallthrough
 	case tea.KeyEnter, tea.KeyEscape:
 		m.confirmDelete = false
+		m.deleteFolder = false
 		return m, nil
 	}
 	return m, nil
 }
-
-// ── Remote screen ──────────────────────────────────────────────────────
 
 func (m model) initRemoteForm(register bool) model {
 	m.remoteRegister = register
@@ -1110,11 +1301,7 @@ func (m model) remotePull() (model, error) {
 	}
 
 	m.entries = merged
-	items := make([]list.Item, len(merged))
-	for i, e := range merged {
-		items[i] = entryItem{entry: e}
-	}
-	m.entryList.SetItems(items)
+	m = m.rebuildList()
 
 	return m, nil
 }
@@ -1290,8 +1477,6 @@ func doVerifyAccount(url, token, refreshToken string) tea.Cmd {
 		return accountVerifyMsg{false, ""}
 	}
 }
-
-// ── HTTP helpers ───────────────────────────────────────────────────────
 
 func apiURL(base, path string) string {
 	return base + "/api/v1" + path

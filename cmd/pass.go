@@ -185,8 +185,9 @@ func runPassAdd(cmd *cobra.Command, name string) error {
 	}
 	url, _ := readLine("URL: ")
 	notes, _ := readLine("Notes: ")
+	folder, _ := readLine("Folder: ")
 
-	entry := vault.NewEntry(name, username, password, url, notes)
+	entry := vault.NewEntry(name, username, password, url, notes, folder)
 	entries = append(entries, entry)
 
 	if err := vault.Save([]byte(pw), entries); err != nil {
@@ -216,6 +217,9 @@ func runPassGet(name string) error {
 	fmt.Printf("Password: %s\n", string(entry.Password))
 	if entry.Username != "" {
 		fmt.Printf("Username: %s\n", entry.Username)
+	}
+	if entry.Folder != "" {
+		fmt.Printf("Folder:   %s\n", entry.Folder)
 	}
 	if entry.URL != "" {
 		fmt.Printf("URL:      %s\n", entry.URL)
@@ -353,11 +357,16 @@ func runPassEdit(cmd *cobra.Command, name string) error {
 	if err != nil {
 		return err
 	}
+	folder, err := readOptional("Folder", entry.Folder)
+	if err != nil {
+		return err
+	}
 
 	entries[idx].Username = username
 	entries[idx].Password = []byte(password)
 	entries[idx].URL = url
 	entries[idx].Notes = notes
+	entries[idx].Folder = folder
 	entries[idx].Updated = entry.Updated
 
 	if err := vault.Save([]byte(pw), entries); err != nil {
