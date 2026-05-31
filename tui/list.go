@@ -12,6 +12,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// updateList handles all key events on the list screen: add, search, folder navigation, remote sync, delete, and quitting.
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -127,6 +128,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// viewList renders the entry/folder list with a help bar, optional folder indicator, optional search input, and optional delete confirmation.
 func (m model) viewList() string {
 	helpText := helpStyle.Render(" [a] add  [/] search  [r] remote  [d] delete  [q] quit  [↑/↓]  [enter] open")
 
@@ -159,6 +161,7 @@ func (m model) viewList() string {
 	)
 }
 
+// buildItems constructs the list items: if a folder filter is active only entries in that folder are shown; otherwise folders are listed first then unfiled entries.
 func (m model) buildItems() []list.Item {
 	if m.folderFilter != "" {
 		filtered := []vault.Entry{}
@@ -215,6 +218,7 @@ func (m model) buildItems() []list.Item {
 	return items
 }
 
+// rebuildList refreshes the list widget from the current entry set, respecting any active search or folder filter.
 func (m model) rebuildList() model {
 	if m.showSearch {
 		return m.applySearchFilter()
@@ -225,6 +229,7 @@ func (m model) rebuildList() model {
 	return m
 }
 
+// applySearchFilter narrows the visible items to those whose FilterValue contains the search query (case-insensitive).
 func (m model) applySearchFilter() model {
 	query := strings.ToLower(strings.TrimSpace(m.searchInput.Value()))
 	all := m.buildItems()
@@ -247,6 +252,7 @@ func (m model) applySearchFilter() model {
 	return m
 }
 
+// findEntryIdx returns the index of an entry by name, or -1 if not found.
 func (m model) findEntryIdx(name string) int {
 	for i, e := range m.entries {
 		if e.Name == name {
@@ -256,6 +262,7 @@ func (m model) findEntryIdx(name string) int {
 	return -1
 }
 
+// updateConfirmDelete handles y/n confirmation for deleting an entry or an entire folder.
 func (m model) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyRunes:

@@ -14,12 +14,16 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWTManager handles token generation, validation, and blocking.
+// Tokens are HMAC-SHA256 signed. Blocked tokens are stored by SHA256 hash — once blocked,
+// they stay blocked. Like my heart to everyone except you.
 type JWTManager struct {
 	secret    []byte
 	blocked   map[string]bool
 	blockedMu sync.RWMutex
 }
 
+// NewJWTManager creates a JWTManager with the given secret and pre-loaded blocked token hashes.
 func NewJWTManager(secret string, initialBlocked []string) *JWTManager {
 	m := &JWTManager{
 		secret:  []byte(secret),
@@ -31,6 +35,8 @@ func NewJWTManager(secret string, initialBlocked []string) *JWTManager {
 	return m
 }
 
+// GenerateToken creates a signed JWT for the given user ID. Expires in 1 hour.
+// Long enough to be useful, short enough to keep you coming back for more.
 func (m *JWTManager) GenerateToken(userID string) (string, error) {
 	claims := jwt.MapClaims{
 		"sub": userID,
@@ -41,6 +47,8 @@ func (m *JWTManager) GenerateToken(userID string) (string, error) {
 	return token.SignedString(m.secret)
 }
 
+// ValidateToken checks if a token is valid, not expired, and not blocked.
+// Returns the user ID on success — or nothing if you're not who you claim to be.
 func (m *JWTManager) ValidateToken(tokenStr string) (string, error) {
 	if m.isBlocked(tokenStr) {
 		return "", jwt.ErrSignatureInvalid
@@ -66,6 +74,7 @@ func (m *JWTManager) ValidateToken(tokenStr string) (string, error) {
 	return sub, nil
 }
 
+// BlockToken adds a token's SHA256 hash to the blocklist. Already-expired tokens are ignored.
 func (m *JWTManager) BlockToken(tokenStr string) {
 	var parser jwt.Parser
 	token, _, _ := parser.ParseUnverified(tokenStr, jwt.MapClaims{})
@@ -82,6 +91,7 @@ func (m *JWTManager) BlockToken(tokenStr string) {
 	m.blockedMu.Unlock()
 }
 
+// isBlocked checks whether a JWT token's SHA256 hash is in the blocklist.
 func (m *JWTManager) isBlocked(tokenStr string) bool {
 	h := sha256.Sum256([]byte(tokenStr))
 	m.blockedMu.RLock()
@@ -90,6 +100,7 @@ func (m *JWTManager) isBlocked(tokenStr string) bool {
 	return blocked
 }
 
+// AllBlocked returns all currently blocked token hashes. Used for persistence.
 func (m *JWTManager) AllBlocked() []string {
 	m.blockedMu.RLock()
 	defer m.blockedMu.RUnlock()
@@ -100,27 +111,34 @@ func (m *JWTManager) AllBlocked() []string {
 	return hashes
 }
 
+// authRequest is the JSON body for login requests.
 type authRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
+// registerRequest is the JSON body for registration requests.
 type registerRequest struct {
 	Username   string `json:"username"`
 	Password   string `json:"password"`
 	InviteCode string `json:"invite_code"`
 }
 
+// writeJSON serializes v as JSON and writes it with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
 
+// writeError is a shorthand for writeJSON with an {"error": msg} envelope.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// handleRegister processes POST /api/v1/auth/register. Validates invite code, creates user,
+//
+//	returns JWT + refresh token. Rate-limited to 3 per minute — don't be greedy.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -164,6 +182,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleLogin processes POST /api/v1/auth/login. Authenticates username/password, returns
+//
+//	JWT + refresh token. Rate-limited to 5 per minute — calm down.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req authRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -200,6 +221,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRefresh processes POST /api/v1/auth/refresh. Issues a new JWT + refresh token pair
+//
+//	in exchange for a valid refresh token. Old token is consumed — one-time use, like my trust.
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
@@ -248,6 +272,9 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleLogout processes POST /api/v1/auth/logout. Blocks the JWT, deletes refresh tokens,
+//
+//	persists the blocklist. Leaving so soon? Don't forget to come back.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.Header.Get("Authorization")
 	if len(tokenStr) > 7 {
@@ -273,6 +300,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleDeleteAccount processes DELETE /api/v1/account. Deletes the user's vault, refresh tokens,
+//
+//	and account. Irreversible — like the things I'd do for you.
 func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 
@@ -309,6 +339,9 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleHealth processes GET /api/v1/health. Returns {"status":"ok"} — the server is alive,
+//
+//	and so is my obsession with you.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

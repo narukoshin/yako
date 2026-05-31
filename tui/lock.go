@@ -12,6 +12,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// updateLock handles the unlock screen: on Enter it loads the vault with the entered password and transitions to the list screen.
 func (m model) updateLock(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.lockInput, cmd = m.lockInput.Update(msg)
@@ -53,6 +54,7 @@ func (m model) updateLock(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// viewLock renders the welcome screen with the master-password input and any error message.
 func (m model) viewLock() string {
 	var b strings.Builder
 	b.WriteString("\n\n\n")

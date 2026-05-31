@@ -10,11 +10,13 @@ import (
 	ck "github.com/narukoshin/yako/v1/crypto"
 )
 
+// init registers the decrypt command and its output flag.
 func init() {
 	rootCmd.AddCommand(decryptCmd)
 	decryptCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 }
 
+// decryptCmd decrypts ciphertext from a file or stdin using the identity private key.
 var decryptCmd = &cobra.Command{
 	Use:   "decrypt [file]",
 	Short: "Decrypt a message or file",
@@ -24,6 +26,7 @@ var decryptCmd = &cobra.Command{
 	},
 }
 
+// runDecrypt loads the private key, reads ciphertext from file or stdin, decrypts, and writes to file or stdout.
 func runDecrypt(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 

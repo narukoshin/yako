@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// userInfo is a safe subset of [User] returned by admin endpoints (no password hash exposed).
 type userInfo struct {
 	ID        string     `json:"id"`
 	Username  string     `json:"username"`
@@ -17,6 +18,7 @@ type userInfo struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
+// handleAdminUsers processes GET /api/v1/admin/users. Returns all users (minus password hashes).
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.store.LoadUsers()
 	if err != nil {
@@ -38,6 +40,9 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"users": info})
 }
 
+// handleAdminInvite processes POST /api/v1/admin/invite. Creates a new invite code with
+//
+//	an optional expiry window (default 24h, max 168h). One ticket per guest.
 func (s *Server) handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 	adminID := r.Context().Value(ctxKeyUserID).(string)
 	admin, err := s.store.GetUser(adminID)
@@ -64,6 +69,7 @@ func (s *Server) handleAdminInvite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleAdminInvites processes GET /api/v1/admin/invites. Lists all invite codes with their status.
 func (s *Server) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 	codes, err := s.store.LoadInviteCodes()
 	if err != nil {
@@ -78,6 +84,7 @@ func (s *Server) handleAdminInvites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"invites": codes})
 }
 
+// handleAdminRevokeInvite processes DELETE /api/v1/admin/invites/{code}. Deletes an invite code.
 func (s *Server) handleAdminRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
 	if code == "" {
@@ -93,6 +100,9 @@ func (s *Server) handleAdminRevokeInvite(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// handleAdminBanUser processes PUT /api/v1/admin/users/{username}/ban. Sets a user's status to
+//
+//	banned. Can't ban yourself — that would be lonely.
 func (s *Server) handleAdminBanUser(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 	if username == "" {
@@ -127,6 +137,9 @@ func (s *Server) handleAdminBanUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "banned", "username": username})
 }
 
+// handleAdminUnbanUser processes PUT /api/v1/admin/users/{username}/unban. Restores a banned
+//
+//	user to active status. Forgiveness is possible, but I won't forget.
 func (s *Server) handleAdminUnbanUser(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 	if username == "" {
@@ -149,6 +162,9 @@ func (s *Server) handleAdminUnbanUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unbanned", "username": username})
 }
 
+// handleAdminDeleteUser processes DELETE /api/v1/admin/users/{username}. Deletes the user, their
+//
+//	vault, and refresh tokens. Irreversible — I don't do do-overs.
 func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 	if username == "" {
@@ -186,6 +202,9 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "username": username})
 }
 
+// handleAdminDestroy processes DELETE /api/v1/admin/destroy. Wipes all server data except
+//
+//	config.yml. Nuclear option — like my feelings for you.
 func (s *Server) handleAdminDestroy(w http.ResponseWriter, r *http.Request) {
 	adminID := r.Context().Value(ctxKeyUserID).(string)
 

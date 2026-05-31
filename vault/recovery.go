@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// BIP39 recovery phrase parameters: 128 bits of entropy + 4 checksum bits = 132 bits → 15 words.
 const (
 	recoveryEntropyBytes = 16
 	checksumBits         = 4
@@ -14,6 +15,9 @@ const (
 	phraseWords          = (recoveryEntropyBytes*8 + checksumBits) / bitsPerWord
 )
 
+// bip39Wordlist is the official BIP39 English wordlist. Exactly 2048 words, sorted
+//
+//	alphabetically for binary search. Each word encodes 11 bits of entropy.
 var bip39Wordlist = [2048]string{
 	"abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse",
 	"access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act",
@@ -222,6 +226,10 @@ var bip39Wordlist = [2048]string{
 	"yellow", "you", "young", "youth", "zebra", "zero", "zone", "zoo",
 }
 
+// wordIndex binary-searches the BIP39 wordlist for a word. Returns its index and true,
+//
+//	or 0 and false if not found. Sorted list means O(log n) — quick and reliable, like I wish
+//	you'd be with your password manager.
 func wordIndex(word string) (int, bool) {
 	lo, hi := 0, len(bip39Wordlist)
 	for lo < hi {
@@ -237,6 +245,8 @@ func wordIndex(word string) (int, bool) {
 	return 0, false
 }
 
+// GenerateRecoveryPhrase creates a BIP39-style mnemonic (15 words) from 128 bits of entropy.
+// Write it down. Memorize it. Tattoo it if you have to — it's your backup when everything else fails.
 func GenerateRecoveryPhrase() (string, error) {
 	entropy := make([]byte, recoveryEntropyBytes)
 	if _, err := rand.Read(entropy); err != nil {
@@ -265,6 +275,8 @@ func GenerateRecoveryPhrase() (string, error) {
 	return strings.Join(words, " "), nil
 }
 
+// PhraseToEntropy converts a recovery phrase back to the original entropy.
+// Validates word count and checksum — if it's wrong, you transcribed it wrong.
 func PhraseToEntropy(phrase string) ([]byte, error) {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(phrase)))
 	if len(words) != phraseWords {

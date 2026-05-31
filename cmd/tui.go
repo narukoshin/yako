@@ -6,10 +6,12 @@ import (
 	"github.com/narukoshin/yako/v1/tui"
 )
 
+// init registers the tui command on the root command.
 func init() {
 	rootCmd.AddCommand(tuiCmd)
 }
 
+// tuiCmd launches the full-screen Bubble Tea terminal UI for vault management.
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Launch the interactive terminal UI",

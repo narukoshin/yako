@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// RateLimiter implements a sliding-window rate limiter per IP.
+// Each IP gets a fixed number of requests per time window. Exceed it and you wait —
+// I'm not that easy.
 type RateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -16,6 +19,7 @@ type RateLimiter struct {
 	stop     chan struct{}
 }
 
+// NewRateLimiter creates a rate limiter that allows `limit` requests per `window` duration per IP.
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	rl := &RateLimiter{
 		attempts: make(map[string][]time.Time),
@@ -28,10 +32,13 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 	return rl
 }
 
+// Stop shuts down the background cleanup goroutine.
 func (rl *RateLimiter) Stop() {
 	close(rl.stop)
 }
 
+// Allow checks if an IP has remaining capacity in the current window.
+// Returns false and sets Retry-After header via [Middleware] when rate-limited.
 func (rl *RateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -57,6 +64,9 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
+// cleanupLoop periodically purges expired entries from the rate limiter map.
+//
+//	Runs every minute in the background until [RateLimiter.Stop] is called.
 func (rl *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
@@ -85,6 +95,8 @@ func (rl *RateLimiter) cleanupLoop() {
 	}
 }
 
+// Middleware wraps an HTTP handler with rate limiting. Returns 429 with Retry-After
+// when the client exceeds the limit — patience is a virtue, but I'll enforce it.
 func (rl *RateLimiter) Middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)

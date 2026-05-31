@@ -19,6 +19,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// initRemoteForm populates the remote-login or remote-register form inputs and focuses the URL field.
 func (m model) initRemoteForm(register bool) model {
 	m.remoteRegister = register
 
@@ -64,6 +65,7 @@ func (m model) initRemoteForm(register bool) model {
 	return m
 }
 
+// updateRemote dispatches to the login-form handler or the home-screen handler depending on whether inputs are active.
 func (m model) updateRemote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.remoteInputs != nil {
 		return m.updateRemoteLogin(msg)
@@ -71,6 +73,7 @@ func (m model) updateRemote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateRemoteHome(msg)
 }
 
+// updateRemoteHome handles the remote-sync home screen: login, register, push, pull, logout, and delete-vault actions.
 func (m model) updateRemoteHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -159,6 +162,7 @@ func (m model) updateRemoteHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateRemoteLogin handles tab navigation and submission of the remote login/register form.
 func (m model) updateRemoteLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -229,6 +233,7 @@ func (m model) updateRemoteLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// viewRemote renders either the login form or the home screen depending on whether inputs are active.
 func (m model) viewRemote() string {
 	if m.remoteInputs != nil {
 		return m.viewRemoteLogin()
@@ -236,6 +241,7 @@ func (m model) viewRemote() string {
 	return m.viewRemoteHome()
 }
 
+// viewRemoteHome renders the remote-sync dashboard showing connection status, server info, and action buttons.
 func (m model) viewRemoteHome() string {
 	var b strings.Builder
 
@@ -268,6 +274,7 @@ func (m model) viewRemoteHome() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
 
+// viewRemoteLogin renders the server URL, username, password, and optional invite-code fields.
 func (m model) viewRemoteLogin() string {
 	var b strings.Builder
 
@@ -305,6 +312,7 @@ func (m model) viewRemoteLogin() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
 
+// remotePush uploads the local vault file to the server; retries with a refreshed token on 401.
 func (m model) remotePush() (model, error) {
 	data, err := os.ReadFile(config.VaultPath())
 	if err != nil {
@@ -336,6 +344,7 @@ func (m model) remotePush() (model, error) {
 	return m, nil
 }
 
+// remotePull downloads the server vault, merges it with local entries via [vault.MergeEntries], and saves the result.
 func (m model) remotePull() (model, error) {
 	localEntries := make([]vault.Entry, len(m.entries))
 	copy(localEntries, m.entries)
@@ -394,6 +403,7 @@ func (m model) remotePull() (model, error) {
 	return m, nil
 }
 
+// remoteDeleteVault deletes the user's account and vault from the server and clears local saved credentials.
 func (m model) remoteDeleteVault() (model, error) {
 	resp, err := remoteRequest("DELETE", apiURL(m.remoteURL, "/account"), m.remoteToken, nil)
 	if err != nil {
@@ -430,6 +440,7 @@ func (m model) remoteDeleteVault() (model, error) {
 	return m, nil
 }
 
+// loadRemoteToken reads and decrypts the persisted remote session file, returning the stored server URL, tokens, and username.
 func loadRemoteToken() (serverURL, token, refreshToken, username string) {
 	data, err := os.ReadFile(config.AppDir() + "/remote")
 	if err != nil {
@@ -451,6 +462,7 @@ func loadRemoteToken() (serverURL, token, refreshToken, username string) {
 	return rc.ServerURL, rc.Token, rc.RefreshToken, rc.Username
 }
 
+// saveRemoteToken encrypts the current remote session and persists it to disk under the app directory.
 func (m model) saveRemoteToken() error {
 	rc := struct {
 		ServerURL    string `json:"server_url"`
@@ -480,6 +492,7 @@ func (m model) saveRemoteToken() error {
 	return os.WriteFile(config.AppDir()+"/remote", encrypted, 0600)
 }
 
+// refreshAccessToken exchanges the stored refresh token for a new access token and persists it.
 func (m model) refreshAccessToken() (model, error) {
 	body, _ := json.Marshal(map[string]string{"refresh_token": m.remoteRefreshToken})
 	resp, err := http.Post(apiURL(m.remoteURL, "/auth/refresh"), "application/json", bytes.NewReader(body))
@@ -507,6 +520,7 @@ func (m model) refreshAccessToken() (model, error) {
 	return m, nil
 }
 
+// doHealthCheck returns a tea.Cmd that pings the server's /health endpoint and sends a [healthCheckMsg] back.
 func doHealthCheck(url string) tea.Cmd {
 	return func() tea.Msg {
 		resp, err := http.Get(apiURL(url, "/health"))
@@ -521,6 +535,7 @@ func doHealthCheck(url string) tea.Cmd {
 	}
 }
 
+// doVerifyAccount returns a tea.Cmd that verifies the remote account is still valid (HEAD /vault) and attempts a token refresh on 401.
 func doVerifyAccount(url, token, refreshToken string) tea.Cmd {
 	return func() tea.Msg {
 		req, _ := http.NewRequest("HEAD", apiURL(url, "/vault"), nil)
@@ -556,10 +571,12 @@ func doVerifyAccount(url, token, refreshToken string) tea.Cmd {
 	}
 }
 
+// apiURL constructs a full server API URL by appending /api/v1 to the given base.
 func apiURL(base, path string) string {
 	return base + "/api/v1" + path
 }
 
+// remoteRequest creates and executes an HTTP request with an optional Bearer token and JSON content-type for non-nil bodies.
 func remoteRequest(method, url, token string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
@@ -574,6 +591,7 @@ func remoteRequest(method, url, token string, body []byte) (*http.Response, erro
 	return http.DefaultClient.Do(req)
 }
 
+// remoteRegister creates a new account on the remote server with an invite code and returns the access and refresh tokens.
 func remoteRegister(serverURL, username, password, inviteCode string) (string, string, error) {
 	body, _ := json.Marshal(map[string]string{
 		"username":    username,
@@ -602,6 +620,7 @@ func remoteRegister(serverURL, username, password, inviteCode string) (string, s
 	return result.Token, result.RefreshToken, nil
 }
 
+// remoteLogin authenticates against the remote server and returns an access token and a refresh token.
 func remoteLogin(serverURL, username, password string) (string, string, error) {
 	reqBody, _ := json.Marshal(map[string]string{"username": username, "password": password})
 	resp, err := remoteRequest("POST", apiURL(serverURL, "/auth/login"), "", reqBody)

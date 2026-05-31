@@ -12,17 +12,20 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// init registers the vault command and its subcommands (init, destroy).
 func init() {
 	rootCmd.AddCommand(vaultCmd)
 	vaultCmd.AddCommand(vaultInitCmd)
 	vaultCmd.AddCommand(vaultDestroyCmd)
 }
 
+// vaultCmd is the parent command for vault management subcommands.
 var vaultCmd = &cobra.Command{
 	Use:   "vault",
 	Short: "Manage the password vault",
 }
 
+// vaultInitCmd initializes a new password vault with recovery phrase generation.
 var vaultInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a new password vault",
@@ -31,6 +34,7 @@ var vaultInitCmd = &cobra.Command{
 	},
 }
 
+// vaultDestroyCmd deletes the local vault file (with optional remote deletion).
 var vaultDestroyCmd = &cobra.Command{
 	Use:   "destroy",
 	Short: "Delete the local vault file permanently",
@@ -39,6 +43,7 @@ var vaultDestroyCmd = &cobra.Command{
 	},
 }
 
+// runVaultInit creates a new vault with a master password and recovery phrase.
 func runVaultInit() error {
 	if vault.Exists() {
 		return kerr.ErrVaultExists
@@ -65,6 +70,7 @@ func runVaultInit() error {
 	return nil
 }
 
+// runVaultDestroy destroys the local vault and optionally the remote vault and remote config.
 func runVaultDestroy() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault

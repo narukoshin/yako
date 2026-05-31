@@ -16,17 +16,27 @@ import (
 	ck "github.com/narukoshin/yako/v1/crypto"
 )
 
+// UserRole defines the role of a server user (admin or regular user).
 type UserRole string
+
+// UserStatus defines whether a user account is active or banned.
 type UserStatus string
 
 const (
+	// RoleAdmin has full access to all admin endpoints.
 	RoleAdmin UserRole = "admin"
-	RoleUser  UserRole = "user"
 
+	// RoleUser has standard access to their own vault only.
+	RoleUser UserRole = "user"
+
+	// StatusActive means the user can log in and use the service.
 	StatusActive UserStatus = "active"
+
+	// StatusBanned means the user is locked out. No appeals — I don't forgive twice.
 	StatusBanned UserStatus = "banned"
 )
 
+// User represents a registered server user with credentials, role, and status.
 type User struct {
 	ID           string     `json:"id"`
 	Username     string     `json:"username"`
@@ -36,6 +46,7 @@ type User struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// InviteCode is a one-time-use code for user registration. Expires after a set time.
 type InviteCode struct {
 	Code      string    `json:"code"`
 	CreatedBy string    `json:"created_by"`
@@ -43,12 +54,16 @@ type InviteCode struct {
 	Used      bool      `json:"used"`
 }
 
+// Store manages all server persistence: users, vaults, invite codes, refresh tokens,
+// and blocked token hashes. File-based JSON storage, encrypted at rest when a storage key
+// is configured — because even files deserve privacy.
 type Store struct {
 	Config     *Config
 	storageKey []byte
 	mu         sync.RWMutex
 }
 
+// NewStore creates a Store backed by the given config. Decodes the storage key if present.
 func NewStore(cfg *Config) *Store {
 	s := &Store{Config: cfg}
 	if cfg.StorageKey != "" {
@@ -59,6 +74,7 @@ func NewStore(cfg *Config) *Store {
 	return s
 }
 
+// encryptForStorage encrypts data with the storage key, or returns plaintext if no key is set.
 func (s *Store) encryptForStorage(plaintext []byte) ([]byte, error) {
 	if s.storageKey == nil {
 		return plaintext, nil
@@ -66,6 +82,7 @@ func (s *Store) encryptForStorage(plaintext []byte) ([]byte, error) {
 	return ck.Encrypt(s.storageKey, plaintext)
 }
 
+// decryptFromStorage decrypts data with the storage key, or returns it as-is if no key is set.
 func (s *Store) decryptFromStorage(ciphertext []byte) ([]byte, error) {
 	if s.storageKey == nil {
 		return ciphertext, nil
@@ -73,6 +90,7 @@ func (s *Store) decryptFromStorage(ciphertext []byte) ([]byte, error) {
 	return ck.Decrypt(s.storageKey, ciphertext)
 }
 
+// readFile reads a file from disk and decrypts it transparently.
 func (s *Store) readFile(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -81,6 +99,7 @@ func (s *Store) readFile(path string) ([]byte, error) {
 	return s.decryptFromStorage(data)
 }
 
+// writeFile encrypts data transparently and writes it to disk.
 func (s *Store) writeFile(path string, data []byte) error {
 	encrypted, err := s.encryptForStorage(data)
 	if err != nil {
@@ -89,6 +108,7 @@ func (s *Store) writeFile(path string, data []byte) error {
 	return os.WriteFile(path, encrypted, 0600)
 }
 
+// LoadUsers reads all registered users from disk. Returns nil slice if file doesn't exist.
 func (s *Store) LoadUsers() ([]User, error) {
 	data, err := s.readFile(s.Config.UsersPath())
 	if err != nil {
@@ -104,6 +124,7 @@ func (s *Store) LoadUsers() ([]User, error) {
 	return users, nil
 }
 
+// saveUsers serializes and writes the user list to disk with optional encryption.
 func (s *Store) saveUsers(users []User) error {
 	data, err := json.MarshalIndent(users, "", "  ")
 	if err != nil {
@@ -112,6 +133,7 @@ func (s *Store) saveUsers(users []User) error {
 	return s.writeFile(s.Config.UsersPath(), data)
 }
 
+// GetUser looks up a user by their unique ID.
 func (s *Store) GetUser(id string) (*User, error) {
 	users, err := s.LoadUsers()
 	if err != nil {
@@ -125,6 +147,7 @@ func (s *Store) GetUser(id string) (*User, error) {
 	return nil, fmt.Errorf("user not found")
 }
 
+// FindUser looks up a user by their username.
 func (s *Store) FindUser(username string) (*User, error) {
 	users, err := s.LoadUsers()
 	if err != nil {
@@ -138,6 +161,7 @@ func (s *Store) FindUser(username string) (*User, error) {
 	return nil, fmt.Errorf("user not found")
 }
 
+// UpdateUser replaces an existing user's data in the users file.
 func (s *Store) UpdateUser(updated *User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -156,6 +180,7 @@ func (s *Store) UpdateUser(updated *User) error {
 	return fmt.Errorf("user not found")
 }
 
+// DeleteUser removes a user by username from the users file.
 func (s *Store) DeleteUser(username string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,6 +199,7 @@ func (s *Store) DeleteUser(username string) error {
 	return fmt.Errorf("user not found")
 }
 
+// UserCount returns the total number of registered users.
 func (s *Store) UserCount() (int, error) {
 	users, err := s.LoadUsers()
 	if err != nil {
@@ -182,6 +208,8 @@ func (s *Store) UserCount() (int, error) {
 	return len(users), nil
 }
 
+// Register creates a new user account after validating the invite code.
+// Password must be at least 8 characters. Username must be unique.
 func (s *Store) Register(username, password, inviteCode string) (*User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -254,6 +282,8 @@ func (s *Store) Register(username, password, inviteCode string) (*User, error) {
 	return user, nil
 }
 
+// Authenticate verifies username/password against bcrypt hashes.
+// Wrong credentials always return "invalid credentials" — no hints about which was wrong.
 func (s *Store) Authenticate(username, password string) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -274,6 +304,7 @@ func (s *Store) Authenticate(username, password string) (*User, error) {
 	return nil, fmt.Errorf("invalid credentials")
 }
 
+// CreateAdmin bootstraps the first admin user. Only works when no users exist.
 func (s *Store) CreateAdmin(username, password string) (*User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -314,6 +345,7 @@ func (s *Store) CreateAdmin(username, password string) (*User, error) {
 	return user, nil
 }
 
+// LoadInviteCodes reads all invite codes from disk. Returns nil slice if file doesn't exist.
 func (s *Store) LoadInviteCodes() ([]InviteCode, error) {
 	data, err := s.readFile(s.Config.invitesPath())
 	if err != nil {
@@ -329,6 +361,7 @@ func (s *Store) LoadInviteCodes() ([]InviteCode, error) {
 	return codes, nil
 }
 
+// saveInviteCodes serializes and writes the invite code list to disk with encryption.
 func (s *Store) saveInviteCodes(codes []InviteCode) error {
 	data, err := json.MarshalIndent(codes, "", "  ")
 	if err != nil {
@@ -337,6 +370,7 @@ func (s *Store) saveInviteCodes(codes []InviteCode) error {
 	return s.writeFile(s.Config.invitesPath(), data)
 }
 
+// CreateInviteCode generates a random invite code with an optional expiry (default 24h, max 168h).
 func (s *Store) CreateInviteCode(createdBy string, expiryHours int) (*InviteCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -370,6 +404,7 @@ func (s *Store) CreateInviteCode(createdBy string, expiryHours int) (*InviteCode
 	return code, nil
 }
 
+// ValidateInviteCode checks whether an invite code is valid, unexpired, and unused.
 func (s *Store) ValidateInviteCode(code string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -393,6 +428,8 @@ func (s *Store) ValidateInviteCode(code string) error {
 	return fmt.Errorf("invite code not found")
 }
 
+// ConsumeInviteCode marks an invite code as used. One-time use — like my patience when you
+// forget the password again.
 func (s *Store) ConsumeInviteCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -414,6 +451,7 @@ func (s *Store) ConsumeInviteCode(code string) error {
 	return fmt.Errorf("invite code not found")
 }
 
+// DeleteInviteCode removes an invite code from the store.
 func (s *Store) DeleteInviteCode(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -432,10 +470,12 @@ func (s *Store) DeleteInviteCode(code string) error {
 	return fmt.Errorf("invite code not found")
 }
 
+// SaveVault writes a user's encrypted vault data to disk.
 func (s *Store) SaveVault(userID string, data []byte) error {
 	return s.writeFile(s.Config.VaultPath(userID), data)
 }
 
+// LoadVault reads a user's encrypted vault data from disk. Returns nil if none exists.
 func (s *Store) LoadVault(userID string) ([]byte, error) {
 	data, err := s.readFile(s.Config.VaultPath(userID))
 	if err != nil {
@@ -447,20 +487,25 @@ func (s *Store) LoadVault(userID string) ([]byte, error) {
 	return data, nil
 }
 
+// DeleteVault removes a user's vault file from disk. No take-backs.
 func (s *Store) DeleteVault(userID string) error {
 	return os.Remove(s.Config.VaultPath(userID))
 }
 
+// RefreshToken is a long-lived token for obtaining new JWT tokens without re-authentication.
+// Stored by SHA256 hash — the raw token is returned to the user and never saved.
 type RefreshToken struct {
 	Hash      string    `json:"h"`
 	UserID    string    `json:"u"`
 	ExpiresAt time.Time `json:"e"`
 }
 
+// refreshTokensPath returns the path to the refresh tokens file.
 func (s *Store) refreshTokensPath() string {
 	return filepath.Join(s.Config.DataDir, "refresh_tokens")
 }
 
+// LoadRefreshTokens reads all refresh tokens from disk. Returns nil slice if file doesn't exist.
 func (s *Store) LoadRefreshTokens() ([]RefreshToken, error) {
 	data, err := s.readFile(s.refreshTokensPath())
 	if err != nil {
@@ -476,6 +521,7 @@ func (s *Store) LoadRefreshTokens() ([]RefreshToken, error) {
 	return tokens, nil
 }
 
+// saveRefreshTokens serializes and writes the refresh token list to disk with encryption.
 func (s *Store) saveRefreshTokens(tokens []RefreshToken) error {
 	data, err := json.Marshal(tokens)
 	if err != nil {
@@ -484,6 +530,8 @@ func (s *Store) saveRefreshTokens(tokens []RefreshToken) error {
 	return s.writeFile(s.refreshTokensPath(), data)
 }
 
+// CreateRefreshToken generates a random refresh token (32 bytes, hex-encoded) for a user.
+// The token hash is stored; the raw value is returned exactly once — lose it and it's gone.
 func (s *Store) CreateRefreshToken(userID string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -511,6 +559,8 @@ func (s *Store) CreateRefreshToken(userID string) (string, error) {
 	return token, nil
 }
 
+// ValidateRefreshToken checks a raw refresh token against stored hashes.
+// Returns the user ID if valid and not expired.
 func (s *Store) ValidateRefreshToken(token string) (string, error) {
 	hash := sha256Hex(token)
 
@@ -532,6 +582,7 @@ func (s *Store) ValidateRefreshToken(token string) (string, error) {
 	return "", fmt.Errorf("refresh token not found")
 }
 
+// DeleteRefreshToken removes a specific refresh token by its raw value.
 func (s *Store) DeleteRefreshToken(token string) error {
 	hash := sha256Hex(token)
 
@@ -551,6 +602,7 @@ func (s *Store) DeleteRefreshToken(token string) error {
 	return s.saveRefreshTokens(filtered)
 }
 
+// DeleteUserRefreshTokens removes all refresh tokens for a given user. Logout = scorched earth.
 func (s *Store) DeleteUserRefreshTokens(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -568,11 +620,13 @@ func (s *Store) DeleteUserRefreshTokens(userID string) error {
 	return s.saveRefreshTokens(filtered)
 }
 
+// sha256Hex returns the lowercase hex-encoded SHA256 hash of a string.
 func sha256Hex(data string) string {
 	h := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(h[:])
 }
 
+// LoadBlockedTokens reads blocked token hashes from disk. Returns nil slice if file doesn't exist.
 func (s *Store) LoadBlockedTokens() ([]string, error) {
 	data, err := s.readFile(s.Config.BlockedTokensPath())
 	if err != nil {
@@ -588,6 +642,7 @@ func (s *Store) LoadBlockedTokens() ([]string, error) {
 	return hashes, nil
 }
 
+// SaveBlockedTokens persists blocked token hashes to disk.
 func (s *Store) SaveBlockedTokens(hashes []string) error {
 	data, err := json.Marshal(hashes)
 	if err != nil {
@@ -596,6 +651,8 @@ func (s *Store) SaveBlockedTokens(hashes []string) error {
 	return s.writeFile(s.Config.BlockedTokensPath(), data)
 }
 
+// Destroy wipes all server data except the config file. Nuclear option — use with care,
+// or don't use at all. Like my heart.
 func (s *Store) Destroy() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -616,6 +673,9 @@ func (s *Store) Destroy() error {
 	return nil
 }
 
+// hashPassword hashes a password with bcrypt at cost 13. Slow enough to annoy attackers,
+//
+//	fast enough that you won't notice — like my texting pace.
 func hashPassword(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 13)
 	if err != nil {

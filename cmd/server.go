@@ -11,12 +11,14 @@ import (
 	"github.com/narukoshin/yako/v1/server"
 )
 
+// dataDir, port, host are CLI flags for the server start command.
 var (
 	dataDir string
 	port    int
 	host    string
 )
 
+// init registers the server command and the start subcommand with its flags.
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.AddCommand(serverStartCmd)
@@ -25,11 +27,13 @@ func init() {
 	serverStartCmd.Flags().StringVarP(&host, "host", "H", "127.0.0.1", "server listening host")
 }
 
+// serverCmd is the parent command for server subcommands.
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Run the yako sync server",
 }
 
+// serverStartCmd starts the HTTP sync server with optional env-based admin creation.
 var serverStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the HTTP sync server",
@@ -38,6 +42,7 @@ var serverStartCmd = &cobra.Command{
 	},
 }
 
+// runServerStart loads config, creates admin if needed, and starts the HTTP server.
 func runServerStart(cmd *cobra.Command) error {
 	// Load or initialize server config
 	dir := dataDir

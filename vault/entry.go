@@ -8,8 +8,13 @@ import (
 	"time"
 )
 
+// passwordChars is the 94-character set used for random password generation.
+//
+//	Letters, digits, and special chars — variety is the spice of... security.
 const passwordChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
 
+// GeneratePassword creates a random password of the given length from a 94-char set.
+// Min 1, max 256 — I won't judge if you want something longer, but that's the limit.
 func GeneratePassword(length int) (string, error) {
 	if length < 1 {
 		return "", fmt.Errorf("length must be at least 1")
@@ -28,6 +33,9 @@ func GeneratePassword(length int) (string, error) {
 	return string(result), nil
 }
 
+// entryJSON is the JSON-serializable form of [Entry]. Password is a string here so json can
+//
+//	handle it — converted to/from []byte in [Entry] MarshalJSON/UnmarshalJSON.
 type entryJSON struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -40,6 +48,8 @@ type entryJSON struct {
 	Updated  string `json:"updated"`
 }
 
+// Entry holds one password vault entry. Password is []byte so we can zero it after use —
+// your secrets die when you want them to, not a moment later.
 type Entry struct {
 	ID       string
 	Name     string
@@ -52,6 +62,7 @@ type Entry struct {
 	Updated  string
 }
 
+// MarshalJSON serializes an Entry to JSON, converting Password from []byte to string.
 func (e Entry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(entryJSON{
 		ID:       e.ID,
@@ -66,6 +77,7 @@ func (e Entry) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON deserializes an Entry from JSON, converting Password from string to []byte.
 func (e *Entry) UnmarshalJSON(data []byte) error {
 	var v entryJSON
 	if err := json.Unmarshal(data, &v); err != nil {
@@ -83,12 +95,15 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Zero wipes the password bytes from memory. Call this when you're done — safety first,
+// even when my mind is full of you.
 func (e *Entry) Zero() {
 	for i := range e.Password {
 		e.Password[i] = 0
 	}
 }
 
+// NewEntry creates a new Entry with the current UTC timestamp as Created and Updated.
 func NewEntry(name, username, password, url, notes, folder string) Entry {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return Entry{

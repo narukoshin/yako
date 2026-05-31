@@ -12,6 +12,9 @@ import (
 	vault "github.com/narukoshin/yako/v1/vault"
 )
 
+// handleGetVault processes GET /api/v1/vault. Returns the user's encrypted vault as
+//
+//	application/octet-stream. Empty vaults get 404 — nothing to see here.
 func (s *Server) handleGetVault(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 
@@ -30,6 +33,9 @@ func (s *Server) handleGetVault(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// handleHeadVault processes HEAD /api/v1/vault. Returns headers without the body — just checking
+//
+//	if it's there, like I check my phone for your messages.
 func (s *Server) handleHeadVault(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 
@@ -49,6 +55,9 @@ func (s *Server) handleHeadVault(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePutVault processes PUT /api/v1/vault. Uploads/replaces the user's encrypted vault.
+//
+//	Body is capped at 100 MB — that's a lot of secrets.
 func (s *Server) handlePutVault(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 
@@ -67,6 +76,9 @@ func (s *Server) handlePutVault(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleDeleteVault processes DELETE /api/v1/vault. Removes the user's vault from the server.
+//
+//	Your secrets leave when you do — no traces, no memories.
 func (s *Server) handleDeleteVault(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 
@@ -82,15 +94,20 @@ func (s *Server) handleDeleteVault(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// recoveryTracker enforces per-user rate limiting on recovery code attempts.
+//
+//	Three wrong guesses and the vault is destroyed — no refunds, no regrets.
 type recoveryTracker struct {
 	mu       sync.Mutex
 	attempts map[string]int
 }
 
+// newRecoveryTracker creates a recoveryTracker with an empty attempts map.
 func newRecoveryTracker() *recoveryTracker {
 	return &recoveryTracker{attempts: make(map[string]int)}
 }
 
+// recordAttempt increments the attempt counter for a user. Returns the new count.
 func (rt *recoveryTracker) recordAttempt(userID string) int {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
@@ -98,12 +115,16 @@ func (rt *recoveryTracker) recordAttempt(userID string) int {
 	return rt.attempts[userID]
 }
 
+// resetAttempts clears the attempt counter for a user. Forgiveness for the lucky ones.
 func (rt *recoveryTracker) resetAttempts(userID string) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	delete(rt.attempts, userID)
 }
 
+// handleRecoverVault processes POST /api/v1/recover. Validates a BIP39 recovery phrase against
+//
+//	the user's vault. Three wrong attempts = vault self-destruct. Don't test me.
 func (s *Server) handleRecoverVault(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(ctxKeyUserID).(string)
 

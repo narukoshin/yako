@@ -13,6 +13,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// init registers the admin (config) command group and its subcommands.
 func init() {
 	rootCmd.AddCommand(adminCmd)
 	adminCmd.AddCommand(changePasswordCmd)
@@ -21,12 +22,14 @@ func init() {
 	adminCmd.AddCommand(generateRecoveryCmd)
 }
 
+// adminCmd groups maintenance operations (change-password, export, recover, generate-recovery).
 var adminCmd = &cobra.Command{
 	Use:    "config",
 	Short:  "Configuration and maintenance (hidden)",
 	Hidden: true,
 }
 
+// changePasswordCmd lets the user replace the master password by re-encrypting the vault.
 var changePasswordCmd = &cobra.Command{
 	Use:   "change-password",
 	Short: "Change the vault master password",
@@ -35,6 +38,7 @@ var changePasswordCmd = &cobra.Command{
 	},
 }
 
+// exportVaultCmd dumps all vault entries as indented JSON to stdout.
 var exportVaultCmd = &cobra.Command{
 	Use:   "export",
 	Short: "Export all entries as JSON",
@@ -43,6 +47,7 @@ var exportVaultCmd = &cobra.Command{
 	},
 }
 
+// runChangePassword prompts for the current password, loads entries, and re-saves with a new master password.
 func runChangePassword() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -71,6 +76,7 @@ func runChangePassword() error {
 	return nil
 }
 
+// recoverVaultCmd recovers the vault on a new machine using a 12-word recovery phrase.
 var recoverVaultCmd = &cobra.Command{
 	Use:   "recover-vault",
 	Short: "Recover vault after machine change",
@@ -80,6 +86,7 @@ var recoverVaultCmd = &cobra.Command{
 	},
 }
 
+// generateRecoveryCmd produces a fresh recovery phrase (invalidates the old one).
 var generateRecoveryCmd = &cobra.Command{
 	Use:   "generate-recovery",
 	Short: "Generate a new recovery phrase",
@@ -89,6 +96,7 @@ var generateRecoveryCmd = &cobra.Command{
 	},
 }
 
+// runRecoverVault reads a recovery phrase and re-encrypts the vault for this machine with a new password.
 func runRecoverVault() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -108,6 +116,7 @@ func runRecoverVault() error {
 	return recoverVaultSetNewPassword(entries)
 }
 
+// recoverVaultSetNewPassword prompts for and saves a new master password after recovery.
 func recoverVaultSetNewPassword(entries []vault.Entry) error {
 	pw, err := readAndConfirmPassword("New master password: ", "Confirm new master password: ")
 	if err != nil {
@@ -120,6 +129,7 @@ func recoverVaultSetNewPassword(entries []vault.Entry) error {
 	return nil
 }
 
+// runGenerateRecovery decrypts the vault and generates a fresh recovery phrase, invalidating the old one.
 func runGenerateRecovery() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -144,6 +154,7 @@ func runGenerateRecovery() error {
 	return nil
 }
 
+// runExportVault prompts for the master password and prints all entries as JSON to stdout.
 func runExportVault() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault

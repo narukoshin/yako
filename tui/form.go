@@ -12,6 +12,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// formFieldDef describes one field in the add/edit form: its label, placeholder, whether it's password-masked, and getter/setter accessors.
 type formFieldDef struct {
 	label       string
 	placeholder string
@@ -21,6 +22,7 @@ type formFieldDef struct {
 	set         func(*vault.Entry, string)
 }
 
+// formFields defines the six entry fields: Name, Username, Password, URL, Notes, Folder.
 var formFields = []formFieldDef{
 	{label: "Name", placeholder: "entry name",
 		get: func(e vault.Entry) string { return e.Name },
@@ -42,6 +44,7 @@ var formFields = []formFieldDef{
 		set: func(e *vault.Entry, v string) { e.Folder = v }},
 }
 
+// activeFormFields returns the form fields relevant to the current mode (add-only fields are excluded during edit).
 func (m model) activeFormFields() []formFieldDef {
 	var fields []formFieldDef
 	for _, f := range formFields {
@@ -53,6 +56,7 @@ func (m model) activeFormFields() []formFieldDef {
 	return fields
 }
 
+// initForm populates the form inputs with existing values (edit) or blanks (add) and focuses the first field.
 func (m model) initForm(mode formMode, entryIdx int) model {
 	m.screen = screenForm
 	m.formMode = mode
@@ -94,6 +98,7 @@ func (m model) initForm(mode formMode, entryIdx int) model {
 	return m
 }
 
+// updateForm handles form navigation (tab/shift+tab), password generation (ctrl+g), save (enter), and cancel (esc).
 func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
@@ -188,6 +193,7 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// viewForm renders the form title (Add/Edit) and all input fields with their current values.
 func (m model) viewForm() string {
 	var b strings.Builder
 

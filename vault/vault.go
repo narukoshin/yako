@@ -15,6 +15,9 @@ import (
 	"github.com/narukoshin/yako/v1/kerr"
 )
 
+// Vault binary layout constants. Two header formats (old and new) for backward compatibility.
+//
+//	Payload and recovery sections are length-prefixed. Verification is HMAC-SHA256 over salt+data.
 const (
 	oldHeaderFixedLen = 73
 	headerFixedLen    = 121
@@ -24,6 +27,9 @@ const (
 	verifyHashLen     = 32
 )
 
+// headerSize returns the header length based on the vault data length.
+//
+//	New format (121 bytes) if data is long enough, otherwise old format (73 bytes) for compat.
 func headerSize(data []byte) int {
 	if len(data) >= headerFixedLen {
 		return headerFixedLen
@@ -31,11 +37,17 @@ func headerSize(data []byte) int {
 	return oldHeaderFixedLen
 }
 
+// recoveryEnvelope wraps the recovery code and encrypted entries in the vault.
+//
+//	CodeEnvelope is password-encrypted; EntriesEnvelope is code-encrypted — nested trust.
 type recoveryEnvelope struct {
 	CodeEnvelope    []byte `json:"c"`
 	EntriesEnvelope []byte `json:"d"`
 }
 
+// writeAtomic writes data to a temp file then atomically renames it to the target path.
+//
+//	Partial writes won't corrupt your vault — I'm more careful than that.
 func writeAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	f, err := os.CreateTemp(dir, ".vault-")
@@ -59,17 +71,25 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(f.Name(), path)
 }
 
+// Exists checks whether a default vault file already exists on disk.
 func Exists() bool {
 	_, err := os.Stat(config.VaultPath())
 	return err == nil
 }
 
+// deriveKey combines your password with the machine secret via Argon2id.
+//
+//	The salt is mixed with the machine key — even if someone steals the vault, they can't open
+//	it without this machine. You're bound to me whether you like it or not.
 func deriveKey(password []byte, salt []byte) []byte {
 	machineKey := config.MachineSecret()
 	combined := append(salt, machineKey...)
 	return ck.DeriveKey(password, combined)
 }
 
+// lockoutBytes serializes a LockoutState (attempts + timestamp + HMAC) into 41 bytes.
+//
+//	Stored in the vault header so lockout survives restarts — I have a long memory.
 func lockoutBytes(lo *kerr.LockoutState) []byte {
 	buf := make([]byte, 41)
 	if lo.Attempts > 255 {
@@ -82,6 +102,9 @@ func lockoutBytes(lo *kerr.LockoutState) []byte {
 	return buf
 }
 
+// buildHeader constructs a vault header: salts, lockout state, and optional verification hash.
+//
+//	Every vault starts with a header — like a promise I intend to keep.
 func buildHeader(mainSalt, recSalt []byte, lo *kerr.LockoutState, verifySalt, verifyHash []byte) []byte {
 	buf := make([]byte, headerFixedLen)
 	copy(buf[0:16], mainSalt)
@@ -94,6 +117,10 @@ func buildHeader(mainSalt, recSalt []byte, lo *kerr.LockoutState, verifySalt, ve
 	return buf
 }
 
+// parseHeader extracts all fields from a vault header: salts, lockout state, and optional
+//
+//	verification hash. Returns [ErrCorrupted] if the lockout HMAC doesn't verify — try to cheat
+//	and you'll get nothing. Just like our relationship if you lie to me.
 func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, verifySalt, verifyHash []byte, err error) {
 	if len(data) < oldHeaderFixedLen {
 		return nil, nil, nil, nil, nil, kerr.ErrCorrupted
@@ -115,6 +142,9 @@ func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, 
 	return
 }
 
+// readVaultFile reads the default vault file from disk and checks minimum size.
+//
+//	Missing or truncated vaults get [ErrNoVault] or [ErrCorrupted] — no second chances.
 func readVaultFile() ([]byte, error) {
 	data, err := os.ReadFile(config.VaultPath())
 	if err != nil {
@@ -126,6 +156,9 @@ func readVaultFile() ([]byte, error) {
 	return data, nil
 }
 
+// extractRecoveryPayload locates and extracts the recovery section from raw vault data.
+//
+//	Returns the recovery salt and the encrypted recovery payload.
 func extractRecoveryPayload(data []byte) (recSalt []byte, payload []byte, err error) {
 	hs := headerSize(data)
 	if len(data) < hs+payloadLenSize {
@@ -149,6 +182,9 @@ func extractRecoveryPayload(data []byte) (recSalt []byte, payload []byte, err er
 	return recSalt, data[recoveryStart:recoveryEnd], nil
 }
 
+// extractCodeFromVault decrypts the recovery code from the vault using your password.
+//
+//	Returns an error if no recovery envelope is present or the password is wrong.
 func extractCodeFromVault(password []byte) (string, error) {
 	data, err := readVaultFile()
 	if err != nil {
@@ -210,6 +246,9 @@ func Save(password []byte, entries []Entry) error {
 	return saveWith(password, entries, code)
 }
 
+// saveWith encrypts entries and writes the vault atomically. If code is non-empty, a recovery
+//
+//	envelope is embedded (password-encrypted code + code-encrypted entries).
 func saveWith(password []byte, entries []Entry, code string) error {
 	mainSalt, err := ck.GenerateSalt()
 	if err != nil {
@@ -287,10 +326,13 @@ func saveWith(password []byte, entries []Entry, code string) error {
 	return writeAtomic(config.VaultPath(), buf)
 }
 
+// Load opens the default vault with your password and returns every entry.
+// Wrong password? [ErrWrongPassword]. No vault? [ErrNoVault].
 func Load(password []byte) ([]Entry, error) {
 	return LoadPath(config.VaultPath(), password)
 }
 
+// LoadPath is like [Load] but reads from a specific file instead of the default vault.
 func LoadPath(path string, password []byte) ([]Entry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -382,6 +424,8 @@ func LoadRecoveryWithCode(code string) ([]Entry, error) {
 	return LoadRecoveryWithCodeData(data, code)
 }
 
+// RegenerateRecovery creates a new recovery phrase for the vault, replacing the old one.
+// Loads entries with the current password, generates a fresh phrase, re-saves.
 func RegenerateRecovery(password []byte) (string, error) {
 	if !Exists() {
 		return "", kerr.ErrNoVault
@@ -400,6 +444,9 @@ func RegenerateRecovery(password []byte) (string, error) {
 	return code, nil
 }
 
+// MergeEntries merges a local vault with a remote one for sync.
+// Server entries overwrite local ones by name. Local-only entries are preserved.
+// No duplicates — I don't share.
 func MergeEntries(local, server []Entry) []Entry {
 	merged := make([]Entry, len(server))
 	copy(merged, server)
@@ -421,6 +468,7 @@ func MergeEntries(local, server []Entry) []Entry {
 	return merged
 }
 
+// ResetLockout clears the lockout state in the vault file. Call this when you've been good.
 func ResetLockout() error {
 	data, err := readVaultFile()
 	if err != nil {

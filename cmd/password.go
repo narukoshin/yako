@@ -12,6 +12,8 @@ import (
 	"github.com/narukoshin/yako/v1/kerr"
 )
 
+// readAndConfirmPassword prompts twice, validates strength, and checks that both entries match before returning.
+// Uses [readPassphrase] for masked input under the hood.
 func readAndConfirmPassword(prompt, confirmPrompt string) (string, error) {
 	pw, err := readPassphrase(prompt)
 	if err != nil {
@@ -33,6 +35,8 @@ func readAndConfirmPassword(prompt, confirmPrompt string) (string, error) {
 	return pw, nil
 }
 
+// checkPasswordStrength enforces the minimum bar: 12+ characters, at least one uppercase, one digit, and one symbol.
+// Also triggers a [checkHIBP] call (non-blocking warning) so the user knows if their password has been breached.
 func checkPasswordStrength(pw string) error {
 	if len(pw) < 12 {
 		return fmt.Errorf("password must be at least 12 characters")
@@ -69,12 +73,16 @@ func checkPasswordStrength(pw string) error {
 	return nil
 }
 
+// hibpClient is the HTTP client used to query the Have I Been Pwned API — replaceable for testing.
 var hibpClient interface {
 	Get(string) (*http.Response, error)
 } = &http.Client{Timeout: 5 * time.Second}
 
+// stderrWriter directs breach warnings to stderr so they don't pollute stdout pipelines.
 var stderrWriter io.Writer = os.Stderr
 
+// checkHIBP queries the Have I Been Pwned k-anonymity API using the first 5 hex chars of the SHA-1 hash.
+// Prints a warning to stderr if the password appears in known breaches — never sends the full hash.
 func checkHIBP(pw string) {
 	hash := sha1.Sum([]byte(pw))
 	hexHash := fmt.Sprintf("%X", hash)

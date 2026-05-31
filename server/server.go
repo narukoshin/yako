@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// contextKey is a typed string for storing values in request contexts.
+//
+//	ctxKeyUserID and ctxKeyUserRole are set by [Server.authMiddleware] after JWT validation.
 type contextKey string
 
 const (
@@ -17,6 +20,8 @@ const (
 	ctxKeyUserRole contextKey = "user_role"
 )
 
+// Server is the HTTP sync server. Routes, middleware, rate limiters — everything your vault
+// needs to reach across the network and still feel like it never left home.
 type Server struct {
 	Config          *Config
 	store           *Store
@@ -27,6 +32,8 @@ type Server struct {
 	recoveryTracker *recoveryTracker
 }
 
+// New creates a Server with the given config, sets up all routes and middleware.
+// Call [Server.Start] when you're ready to listen.
 func New(cfg *Config) *Server {
 	s := &Server{
 		Config:          cfg,
@@ -69,16 +76,21 @@ func New(cfg *Config) *Server {
 	return s
 }
 
+// NeedsAdmin returns true if no admin user exists yet. First run? You're the admin now.
 func (s *Server) NeedsAdmin() (bool, error) {
 	n, err := s.store.UserCount()
 	return n == 0, err
 }
 
+// CreateAdmin creates the first admin user. Only works when no users exist — absolute power
+// requires absolute emptiness first.
 func (s *Server) CreateAdmin(username, password string) error {
 	_, err := s.store.CreateAdmin(username, password)
 	return err
 }
 
+// Start listens on the configured address and blocks until SIGINT/SIGTERM.
+// Graceful shutdown on signal — nothing lost, nothing forgotten.
 func (s *Server) Start() error {
 	addr := s.Config.ListenAddr()
 	log.Printf("yako server starting on %s", addr)
@@ -105,6 +117,9 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// authMiddleware validates the Bearer JWT from the Authorization header and injects user ID
+//
+//	and role into the request context. Rejects missing, expired, or banned accounts.
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tokenStr := r.Header.Get("Authorization")
@@ -132,6 +147,9 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// adminMiddleware wraps [Server.authMiddleware] and additionally checks that the user has the
+//
+//	admin role. Access denied if you're not important enough.
 func (s *Server) adminMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return s.authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		role := r.Context().Value(ctxKeyUserRole).(string)

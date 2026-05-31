@@ -12,6 +12,7 @@ import (
 	"github.com/narukoshin/yako/v1/config"
 )
 
+// Start launches the TUI. Zeroes passwords and machine secrets on exit — no trace left behind.
 func Start() error {
 	m := initialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -26,6 +27,7 @@ func Start() error {
 	return err
 }
 
+// initialModel builds the starting TUI state: a locked screen, an empty entry list, and optionally a saved remote session.
 func initialModel() model {
 	ti := textinput.New()
 	ti.Placeholder = "master password"
@@ -67,10 +69,12 @@ func initialModel() model {
 	return m
 }
 
+// Init satisfies tea.Model; returns the blink command for the initial text input cursor.
 func (m model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
+// Update satisfies tea.Model; dispatches window-size changes, health-check results, account-verify messages, and key events to the active screen handler.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -124,6 +128,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View satisfies tea.Model; renders the currently active screen.
 func (m model) View() string {
 	switch m.screen {
 	case screenLock:

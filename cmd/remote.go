@@ -18,8 +18,10 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// adminCacheDuration is how long an admin session token is cached (5 minutes).
 const adminCacheDuration = 5 * time.Minute
 
+// remoteConfig stores the user's remote server credentials, encrypted on disk.
 type remoteConfig struct {
 	ServerURL    string `json:"server_url"`
 	Token        string `json:"token"`
@@ -27,10 +29,12 @@ type remoteConfig struct {
 	Username     string `json:"username,omitempty"`
 }
 
+// remoteConfigPath returns the path to the encrypted remote config file.
 func remoteConfigPath() string {
 	return filepath.Join(config.AppDir(), "remote")
 }
 
+// loadRemoteConfig reads and decrypts the remote config from disk. Machine-bound encryption.
 func loadRemoteConfig() (*remoteConfig, error) {
 	encrypted, err := os.ReadFile(remoteConfigPath())
 	if err != nil {
@@ -52,6 +56,7 @@ func loadRemoteConfig() (*remoteConfig, error) {
 	return &rc, nil
 }
 
+// saveRemoteConfig encrypts and writes the remote config to disk. Machine-bound, just like us.
 func saveRemoteConfig(rc *remoteConfig) error {
 	data, err := json.Marshal(rc)
 	if err != nil {
@@ -69,18 +74,19 @@ func saveRemoteConfig(rc *remoteConfig) error {
 	return os.WriteFile(remoteConfigPath(), encrypted, 0600)
 }
 
-// --- Admin credential caching ---
-
+// adminRemoteConfig stores cached admin credentials for server management.
 type adminRemoteConfig struct {
 	ServerURL string `json:"server_url"`
 	Token     string `json:"token"`
 	CachedAt  int64  `json:"cached_at"`
 }
 
+// adminRemoteConfigPath returns the path to the encrypted admin remote config file.
 func adminRemoteConfigPath() string {
 	return filepath.Join(config.AppDir(), "admin_remote")
 }
 
+// saveAdminConfig encrypts and writes the admin remote config to disk.
 func saveAdminConfig(rc *adminRemoteConfig) error {
 	data, err := json.Marshal(rc)
 	if err != nil {
@@ -98,6 +104,7 @@ func saveAdminConfig(rc *adminRemoteConfig) error {
 	return os.WriteFile(adminRemoteConfigPath(), encrypted, 0600)
 }
 
+// loadAdminConfig reads and decrypts the admin remote config from disk.
 func loadAdminConfig() (*adminRemoteConfig, error) {
 	encrypted, err := os.ReadFile(adminRemoteConfigPath())
 	if err != nil {
@@ -119,6 +126,7 @@ func loadAdminConfig() (*adminRemoteConfig, error) {
 	return &rc, nil
 }
 
+// getAdminToken returns a valid admin token, either from cache or by prompting for login.
 func getAdminToken() (string, string, error) {
 	rc, err := loadAdminConfig()
 	if err == nil && time.Since(time.Unix(rc.CachedAt, 0)) < adminCacheDuration {
@@ -137,6 +145,7 @@ func getAdminToken() (string, string, error) {
 	return adminLoginFlow(serverURL)
 }
 
+// verifyAdminToken checks if the cached admin token is still valid by hitting /admin/users.
 func verifyAdminToken(serverURL, token string) bool {
 	req, _ := http.NewRequest("GET", apiURL(serverURL, "/admin/users"), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -148,6 +157,9 @@ func verifyAdminToken(serverURL, token string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// resolveAdminServerURL determines the server URL: from cached admin config, user remote config,
+//
+//	or by prompting the user. I'll find you anywhere.
 func resolveAdminServerURL() (string, error) {
 	rc, err := loadAdminConfig()
 	if err == nil && rc.ServerURL != "" {
@@ -168,6 +180,9 @@ func resolveAdminServerURL() (string, error) {
 	return readLine("Server URL: ")
 }
 
+// adminLoginFlow prompts for admin credentials, authenticates, caches the session, and returns
+//
+//	the server URL + token.
 func adminLoginFlow(serverURL string) (string, string, error) {
 	username, err := readLine("Admin username: ")
 	if err != nil {
@@ -214,6 +229,7 @@ func adminLoginFlow(serverURL string) (string, string, error) {
 	return serverURL, result.Token, nil
 }
 
+// init registers the remote command, all its subcommands (client + admin groups), and their flags.
 func init() {
 	rootCmd.AddCommand(remoteCmd)
 
@@ -256,13 +272,16 @@ func init() {
 	remoteLogoutCmd.Flags().BoolVarP(&logoutAdmin, "admin", "a", false, "Also clear cached admin session")
 }
 
+// inviteExpiry is the default expiry hours for invite codes.
 var inviteExpiry int
 
+// remoteCmd is the parent command for all remote sync subcommands.
 var remoteCmd = &cobra.Command{
 	Use:   "remote",
 	Short: "Sync vault with a remote server",
 }
 
+// remoteLoginCmd prompts for credentials and saves them to the encrypted remote config.
 var remoteLoginCmd = &cobra.Command{
 	Use:   "login <server-url>",
 	Short: "Authenticate with the sync server",
@@ -272,6 +291,7 @@ var remoteLoginCmd = &cobra.Command{
 	},
 }
 
+// remoteRegisterCmd creates a new account on the remote server with username, password, and invite code.
 var remoteRegisterCmd = &cobra.Command{
 	Use:   "register <server-url>",
 	Short: "Register a new account (requires invite code)",
@@ -281,6 +301,7 @@ var remoteRegisterCmd = &cobra.Command{
 	},
 }
 
+// remotePushCmd uploads the local vault to the remote server.
 var remotePushCmd = &cobra.Command{
 	Use:   "push",
 	Short: "Upload vault to remote server",
@@ -289,6 +310,7 @@ var remotePushCmd = &cobra.Command{
 	},
 }
 
+// remotePullCmd downloads the server vault and merges it with the local one.
 var remotePullCmd = &cobra.Command{
 	Use:   "pull",
 	Short: "Download vault from remote server",
@@ -297,11 +319,13 @@ var remotePullCmd = &cobra.Command{
 	},
 }
 
+// logoutAdmin and pullRecovery are flags for the remote logout and pull commands respectively.
 var (
 	logoutAdmin  bool
 	pullRecovery bool
 )
 
+// remoteLogoutCmd invalidates the server token and removes local stored credentials.
 var remoteLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Invalidate token and remove stored credentials",
@@ -310,6 +334,7 @@ var remoteLogoutCmd = &cobra.Command{
 	},
 }
 
+// remoteStatusCmd checks whether the remote server is reachable via the /health endpoint.
 var remoteStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Check connection to remote server",
@@ -318,10 +343,12 @@ var remoteStatusCmd = &cobra.Command{
 	},
 }
 
+// apiURL joins the server base URL with the /api/v1 prefix and the given path.
 func apiURL(base, path string) string {
 	return base + "/api/v1" + path
 }
 
+// refreshAccessToken exchanges the stored refresh token for a new access token and persists it.
 func refreshAccessToken(rc *remoteConfig) (string, error) {
 	body, _ := json.Marshal(map[string]string{"refresh_token": rc.RefreshToken})
 	resp, err := http.Post(apiURL(rc.ServerURL, "/auth/refresh"), "application/json", bytes.NewReader(body))
@@ -349,6 +376,7 @@ func refreshAccessToken(rc *remoteConfig) (string, error) {
 	return result.Token, nil
 }
 
+// doRequestWithRefresh executes an HTTP request and retries with a refreshed token on 401.
 func doRequestWithRefresh(method, url string, body []byte, rc *remoteConfig) (*http.Response, error) {
 	resp, err := doRequest(method, url, rc.Token, body)
 	if err != nil {
@@ -366,6 +394,7 @@ func doRequestWithRefresh(method, url string, body []byte, rc *remoteConfig) (*h
 	return resp, nil
 }
 
+// doRequest creates and executes an HTTP request with an optional Bearer token and JSON content-type.
 func doRequest(method, url, token string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
@@ -380,6 +409,7 @@ func doRequest(method, url, token string, body []byte) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
+// runRemoteLogin authenticates with username/password and saves the credentials to the encrypted remote config.
 func runRemoteLogin(serverURL string) error {
 	username, err := readLine("Username: ")
 	if err != nil {
@@ -428,6 +458,7 @@ func runRemoteLogin(serverURL string) error {
 	return nil
 }
 
+// runRemoteRegister prompts for credentials and invite code, creates an account, and saves the config.
 func runRemoteRegister(serverURL string) error {
 	username, err := readLine("Username: ")
 	if err != nil {
@@ -481,6 +512,7 @@ func runRemoteRegister(serverURL string) error {
 	return nil
 }
 
+// runRemotePush encrypts and uploads the vault file to the remote server.
 func runRemotePush() error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
@@ -521,6 +553,7 @@ func runRemotePush() error {
 	return nil
 }
 
+// runRemotePull downloads the server vault and merges it with local entries; supports --recovery flag.
 func runRemotePull() error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
@@ -593,6 +626,7 @@ func runRemotePull() error {
 	return nil
 }
 
+// runRemotePullRecovery attempts recovery from the remote server with up to 3 tries; destroys the vault on 3 failures.
 func runRemotePullRecovery(data []byte) error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
@@ -668,6 +702,7 @@ merge:
 	return nil
 }
 
+// runRemoteLogout invalidates the token on the server and removes local credentials (and optionally admin cache).
 func runRemoteLogout() error {
 	if logoutAdmin {
 		if err := os.Remove(adminRemoteConfigPath()); err != nil && !os.IsNotExist(err) {
@@ -695,6 +730,7 @@ func runRemoteLogout() error {
 	return nil
 }
 
+// runRemoteStatus checks server health and reports whether it's reachable.
 func runRemoteStatus() error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
@@ -715,6 +751,7 @@ func runRemoteStatus() error {
 	return nil
 }
 
+// runRemoteDeleteVault deletes the user's account and vault from the server and clears local credentials.
 func runRemoteDeleteVault() error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
@@ -740,6 +777,7 @@ func runRemoteDeleteVault() error {
 	return nil
 }
 
+// runRemoteDestroyServer wipes all server data after admin confirmation (requires URL re-entry).
 func runRemoteDestroyServer() error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -783,8 +821,7 @@ func runRemoteDestroyServer() error {
 	return nil
 }
 
-// --- Admin commands ---
-
+// remoteDeleteVaultCmd deletes the user's vault from the remote server.
 var remoteDeleteVaultCmd = &cobra.Command{
 	Use:     "delete-vault",
 	Aliases: []string{"destroy"},
@@ -794,6 +831,7 @@ var remoteDeleteVaultCmd = &cobra.Command{
 	},
 }
 
+// remoteDestroyServerCmd wipes all server data (admin only, requires token).
 var remoteDestroyServerCmd = &cobra.Command{
 	Use:   "destroy-server",
 	Short: "Wipe all data (users, vaults, invites) from the server",
@@ -802,6 +840,7 @@ var remoteDestroyServerCmd = &cobra.Command{
 	},
 }
 
+// remoteInviteCmd creates a single-use invite code with configurable expiry (--expiry).
 var remoteInviteCmd = &cobra.Command{
 	Use:   "invite",
 	Short: "Create a single-use invite code",
@@ -810,6 +849,7 @@ var remoteInviteCmd = &cobra.Command{
 	},
 }
 
+// remoteInvitesCmd lists all invite codes with their creator, expiry, and used status.
 var remoteInvitesCmd = &cobra.Command{
 	Use:   "invites",
 	Short: "List all invite codes",
@@ -818,6 +858,7 @@ var remoteInvitesCmd = &cobra.Command{
 	},
 }
 
+// remoteDeleteInviteCmd revokes an invite code by its value.
 var remoteDeleteInviteCmd = &cobra.Command{
 	Use:   "delete-invite <code>",
 	Short: "Revoke an invite code",
@@ -827,6 +868,7 @@ var remoteDeleteInviteCmd = &cobra.Command{
 	},
 }
 
+// remoteUsersCmd lists all registered users with roles and statuses (admin only).
 var remoteUsersCmd = &cobra.Command{
 	Use:   "users",
 	Short: "List all registered users",
@@ -835,6 +877,7 @@ var remoteUsersCmd = &cobra.Command{
 	},
 }
 
+// remoteBanCmd bans a user account (admin only).
 var remoteBanCmd = &cobra.Command{
 	Use:   "ban <username>",
 	Short: "Ban a user account",
@@ -844,6 +887,7 @@ var remoteBanCmd = &cobra.Command{
 	},
 }
 
+// remoteUnbanCmd unban a user account (admin only).
 var remoteUnbanCmd = &cobra.Command{
 	Use:   "unban <username>",
 	Short: "Unban a user account",
@@ -853,6 +897,7 @@ var remoteUnbanCmd = &cobra.Command{
 	},
 }
 
+// remoteDeleteUserCmd deletes a user and their vault from the server (admin only).
 var remoteDeleteUserCmd = &cobra.Command{
 	Use:   "delete-user <username>",
 	Short: "Delete a user and their vault",
@@ -862,6 +907,7 @@ var remoteDeleteUserCmd = &cobra.Command{
 	},
 }
 
+// runRemoteInvite creates a single-use invite code by calling the admin API.
 func runRemoteInvite() error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -893,6 +939,7 @@ func runRemoteInvite() error {
 	return nil
 }
 
+// runRemoteInvites fetches and prints all invite codes from the server (admin only).
 func runRemoteInvites() error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -934,6 +981,7 @@ func runRemoteInvites() error {
 	return nil
 }
 
+// runRemoteDeleteInvite revokes an invite code by its value (admin only).
 func runRemoteDeleteInvite(code string) error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -955,6 +1003,7 @@ func runRemoteDeleteInvite(code string) error {
 	return nil
 }
 
+// runRemoteUsers lists all registered users with roles and statuses (admin only).
 func runRemoteUsers() error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -997,6 +1046,7 @@ func runRemoteUsers() error {
 	return nil
 }
 
+// runRemoteBan bans a user account by username (admin only).
 func runRemoteBan(username string) error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -1018,6 +1068,7 @@ func runRemoteBan(username string) error {
 	return nil
 }
 
+// runRemoteUnban removes a ban from a user account (admin only).
 func runRemoteUnban(username string) error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {
@@ -1039,6 +1090,7 @@ func runRemoteUnban(username string) error {
 	return nil
 }
 
+// runRemoteDeleteUser deletes a user and their vault by username (admin only).
 func runRemoteDeleteUser(username string) error {
 	serverURL, token, err := getAdminToken()
 	if err != nil {

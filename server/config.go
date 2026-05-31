@@ -10,6 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config holds the server's YAML-based configuration.
+// Host, Port, DataDir are for networking and storage; JWTSecret and StorageKey are
+// auto-generated on first run — secrets that even I won't tell you.
 type Config struct {
 	Host       string `yaml:"host"`
 	Port       int    `yaml:"port"`
@@ -18,6 +21,8 @@ type Config struct {
 	StorageKey string `yaml:"storage_key,omitempty"`
 }
 
+// DefaultConfig returns a Config with sensible defaults: localhost:8443, data dir next to
+// the executable or in the user's home directory.
 func DefaultConfig() *Config {
 	dataDir := ""
 	if exe, err := os.Executable(); err == nil {
@@ -35,30 +40,39 @@ func DefaultConfig() *Config {
 		DataDir: dataDir,
 	}
 }
+
+// ListenAddr returns the formatted host:port address string.
 func (c *Config) ListenAddr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
+// configPath returns the path to the server YAML config file.
 func (c *Config) configPath() string {
 	return filepath.Join(c.DataDir, "config.yml")
 }
 
+// UsersPath returns the path to the users JSON file.
 func (c *Config) UsersPath() string {
 	return filepath.Join(c.DataDir, "users.json")
 }
 
+// VaultPath returns the path to a user's encrypted vault file.
 func (c *Config) VaultPath(userID string) string {
 	return filepath.Join(c.DataDir, userID+".vault")
 }
 
+// invitesPath returns the path to the invite codes JSON file.
 func (c *Config) invitesPath() string {
 	return filepath.Join(c.DataDir, "invites.json")
 }
 
+// BlockedTokensPath returns the path to the blocked token hashes file.
 func (c *Config) BlockedTokensPath() string {
 	return filepath.Join(c.DataDir, "blocked_tokens")
 }
 
+// LoadOrInitConfig loads server config from YAML, or generates a fresh one with random secrets
+// if none exists. Secrets are auto-generated on first run — I'll keep them safe.
 func LoadOrInitConfig(dataDir string) (*Config, error) {
 	cfg := DefaultConfig()
 	if dataDir != "" {
@@ -109,6 +123,7 @@ func LoadOrInitConfig(dataDir string) (*Config, error) {
 	return cfg, nil
 }
 
+// finalizeConfig ensures JWT and storage keys are set, generating and persisting them if missing.
 func finalizeConfig(cfg *Config, yamlPath string) (*Config, error) {
 	if cfg.JWTSecret == "" {
 		b := make([]byte, 32)

@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// TimeAgo returns a relative time string like "5 minutes ago" or "2 days ago".
+// For when absolute timestamps feel too cold and distant.
 func TimeAgo(t time.Time) string {
 	d := time.Since(t)
 	if d < 0 {

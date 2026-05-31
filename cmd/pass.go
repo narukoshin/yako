@@ -16,6 +16,7 @@ import (
 	"github.com/narukoshin/yako/v1/vault"
 )
 
+// init registers the pass command and its subcommands (add, get, list, copy, rm, edit, generate) with flag definitions.
 func init() {
 	rootCmd.AddCommand(passCmd)
 	passCmd.AddCommand(passAddCmd)
@@ -35,16 +36,19 @@ func init() {
 	passGenerateCmd.Flags().IntP("length", "l", 24, "Password length")
 }
 
+// passCmd is the root for all password subcommands — add, get, list, copy, rm, edit, generate.
 var passCmd = &cobra.Command{
 	Use:   "pass",
 	Short: "Manage passwords in the vault",
 }
 
+// passGenFlag and passLenFlag control whether a password is auto-generated and its length.
 var (
 	passGenFlag bool
 	passLenFlag int
 )
 
+// passAddCmd adds a new entry, optionally generating the password when --generate/-g is set.
 var passAddCmd = &cobra.Command{
 	Use:   "add <name>",
 	Short: "Add a new password entry",
@@ -54,6 +58,7 @@ var passAddCmd = &cobra.Command{
 	},
 }
 
+// passGetCmd displays a single entry's details (password, username, url, notes, folder, last updated).
 var passGetCmd = &cobra.Command{
 	Use:   "get <name>",
 	Short: "Show a password entry",
@@ -63,6 +68,7 @@ var passGetCmd = &cobra.Command{
 	},
 }
 
+// passListCmd prints a table of every entry with its name, username, and last-updated date.
 var passListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all password entries",
@@ -71,6 +77,7 @@ var passListCmd = &cobra.Command{
 	},
 }
 
+// passCopyCmd copies the password to the clipboard and schedules automatic clearing after 45 seconds.
 var passCopyCmd = &cobra.Command{
 	Use:   "copy <name>",
 	Short: "Copy a password to the clipboard",
@@ -80,6 +87,7 @@ var passCopyCmd = &cobra.Command{
 	},
 }
 
+// passRmCmd deletes an entry from the vault by its name.
 var passRmCmd = &cobra.Command{
 	Use:   "rm <name>",
 	Short: "Remove a password entry",
@@ -89,6 +97,7 @@ var passRmCmd = &cobra.Command{
 	},
 }
 
+// passEditCmd opens an interactive prompt to modify an entry; supports --generate/-g for a new random password.
 var passEditCmd = &cobra.Command{
 	Use:   "edit <name>",
 	Short: "Edit a password entry",
@@ -98,6 +107,7 @@ var passEditCmd = &cobra.Command{
 	},
 }
 
+// passGenerateCmd prints a random password of the requested length (default 24) to stdout.
 var passGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate a random password",
@@ -107,6 +117,7 @@ var passGenerateCmd = &cobra.Command{
 	},
 }
 
+// unlockVault prompts for the master password, loads all entries, and returns both for subsequent operations.
 func unlockVault() (string, []vault.Entry, error) {
 	pw, err := readPassphrase("Master password: ")
 	if err != nil {
@@ -119,6 +130,7 @@ func unlockVault() (string, []vault.Entry, error) {
 	return pw, entries, nil
 }
 
+// readLine prints a prompt and reads a full line from stdin (strips trailing newline).
 func readLine(prompt string) (string, error) {
 	fmt.Print(prompt)
 	reader := bufio.NewReader(os.Stdin)
@@ -129,6 +141,7 @@ func readLine(prompt string) (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
+// readOptional prompts with a default value shown in brackets; an empty input keeps the current value.
 func readOptional(prompt, current string) (string, error) {
 	fmt.Printf("%s [%s]: ", prompt, current)
 	reader := bufio.NewReader(os.Stdin)
@@ -143,6 +156,7 @@ func readOptional(prompt, current string) (string, error) {
 	return line, nil
 }
 
+// findEntry scans the entries slice for a matching name and returns its index and pointer, or -1/nil.
 func findEntry(entries []vault.Entry, name string) (int, *vault.Entry) {
 	for i, e := range entries {
 		if e.Name == name {
@@ -152,6 +166,8 @@ func findEntry(entries []vault.Entry, name string) (int, *vault.Entry) {
 	return -1, nil
 }
 
+// runPassAdd prompts for entry fields (username, password, URL, notes, folder) and persists a new entry.
+// If --generate is set the password is auto-created at the configured length.
 func runPassAdd(cmd *cobra.Command, name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -198,6 +214,7 @@ func runPassAdd(cmd *cobra.Command, name string) error {
 	return nil
 }
 
+// runPassGet prints the full details of a single entry: password, username, URL, notes, folder, age.
 func runPassGet(name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -235,6 +252,7 @@ func runPassGet(name string) error {
 	return nil
 }
 
+// runPassList prints a table of all entries with their name, username, and update date.
 func runPassList() error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -262,6 +280,7 @@ func runPassList() error {
 	return nil
 }
 
+// runPassRm removes the named entry from the vault and persists the change.
 func runPassRm(name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -287,6 +306,7 @@ func runPassRm(name string) error {
 	return nil
 }
 
+// runPassCopy copies the entry's password to the system clipboard and auto-clears it after 45 seconds.
 func runPassCopy(name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -311,6 +331,7 @@ func runPassCopy(name string) error {
 	return nil
 }
 
+// runPassEdit interactively updates an entry's fields; blank password input leaves the existing one untouched.
 func runPassEdit(cmd *cobra.Command, name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -377,6 +398,7 @@ func runPassEdit(cmd *cobra.Command, name string) error {
 	return nil
 }
 
+// runPassGenerate prints a cryptographically random password of the requested length.
 func runPassGenerate(length int) error {
 	password, err := vault.GeneratePassword(length)
 	if err != nil {

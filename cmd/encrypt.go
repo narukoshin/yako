@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,13 +12,18 @@ import (
 	"github.com/narukoshin/yako/v1/kerr"
 )
 
+// encryptRecipients holds -r/--recipient flag values for the encrypt command.
+var encryptRecipients []string
+
+// init registers the encrypt command and its flags.
 func init() {
 	rootCmd.AddCommand(encryptCmd)
-	encryptCmd.Flags().StringP("recipient", "r", "", "Recipient's public key (base64)")
+	encryptCmd.Flags().StringArrayVarP(&encryptRecipients, "recipient", "r", nil, "Recipient: base64 pubkey or keyring name (can be specified multiple times)")
 	encryptCmd.Flags().Bool("self", false, "Encrypt to your own public key")
 	encryptCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
 }
 
+// encryptCmd encrypts messages or files for one or more recipients using X25519 + XChaCha20-Poly1305.
 var encryptCmd = &cobra.Command{
 	Use:   "encrypt [file]",
 	Short: "Encrypt a message or file for a recipient",
@@ -30,34 +33,18 @@ var encryptCmd = &cobra.Command{
 	},
 }
 
+// runEncrypt executes the encrypt command: resolves recipients, encrypts plaintext, and writes
+//
+//	output. Can encrypt to self (own pubkey) or to specified recipients from keyring/base64.
 func runEncrypt(cmd *cobra.Command, args []string) error {
-	recipientB64, _ := cmd.Flags().GetString("recipient")
 	self, _ := cmd.Flags().GetBool("self")
 	output, _ := cmd.Flags().GetString("output")
 
-	if recipientB64 == "" && !self {
+	if len(encryptRecipients) == 0 && !self {
 		return kerr.ErrNoRecipient
 	}
-	if recipientB64 != "" && self {
+	if len(encryptRecipients) > 0 && self {
 		return kerr.ErrBothFlags
-	}
-
-	var recipientPub []byte
-	if self {
-		pub, err := os.ReadFile(config.IdentityPubPath())
-		if err != nil {
-			return kerr.ErrNoIdentity
-		}
-		recipientPub = pub
-	} else {
-		var err error
-		recipientPub, err = base64.StdEncoding.DecodeString(strings.TrimSpace(recipientB64))
-		if err != nil {
-			return kerr.ErrInvalidKey
-		}
-		if len(recipientPub) != 32 {
-			return kerr.ErrInvalidKey
-		}
 	}
 
 	var plaintext []byte
@@ -75,7 +62,36 @@ func runEncrypt(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ciphertext, err := ck.EncryptAsymmetric(recipientPub, plaintext)
+	if self {
+		pub, err := os.ReadFile(config.IdentityPubPath())
+		if err != nil {
+			return kerr.ErrNoIdentity
+		}
+		ciphertext, err := ck.EncryptAsymmetric(pub, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt: %w", err)
+		}
+		if output != "" {
+			if err := os.WriteFile(output, ciphertext, 0600); err != nil {
+				return fmt.Errorf("write output: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "Encrypted to %s\n", output)
+		} else {
+			os.Stdout.Write(ciphertext)
+		}
+		return nil
+	}
+
+	recipientPubs := make([][]byte, 0, len(encryptRecipients))
+	for _, r := range encryptRecipients {
+		pub, err := resolveRecipient(r)
+		if err != nil {
+			return fmt.Errorf("recipient %q: %w", r, err)
+		}
+		recipientPubs = append(recipientPubs, pub)
+	}
+
+	ciphertext, err := ck.EncryptAsymmetricMulti(recipientPubs, plaintext)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}

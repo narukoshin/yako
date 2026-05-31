@@ -12,6 +12,7 @@ import (
 	"github.com/narukoshin/yako/v1/kerr"
 )
 
+// updateDetail handles key events on the detail screen: [e] edit, [d] delete, [p] toggle password visibility, [c] copy to clipboard.
 func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.detailMsg = ""
 
@@ -52,6 +53,7 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// viewDetail renders the selected entry's fields (password, username, URL, notes, folder, age) and an action help bar.
 func (m model) viewDetail() string {
 	if m.selectedIdx < 0 || m.selectedIdx >= len(m.entries) {
 		return "no entry selected"
