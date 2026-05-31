@@ -164,6 +164,14 @@ func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		for i, f := range fields {
+			if f.isPassword {
+				m.formInputs[i].SetValue("")
+				m.formInputs[i].Reset()
+				break
+			}
+		}
+
 		m = m.rebuildList()
 
 		if m.formMode == formAdd {

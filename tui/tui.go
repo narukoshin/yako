@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,16 +13,20 @@ import (
 	"github.com/narukoshin/yako/v1/config"
 )
 
-// Start launches the TUI. Zeroes passwords and machine secrets on exit — no trace left behind.
+// Start launches the TUI. Zeroes passwords, clears clipboard, and machine secrets on exit — no trace left behind.
 func Start() error {
 	m := initialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
+	final, err := p.Run()
+	m = final.(model)
 	for i := range m.masterPassword {
 		m.masterPassword[i] = 0
 	}
-	for _, e := range m.entries {
-		e.Zero()
+	for i := range m.entries {
+		m.entries[i].Zero()
+	}
+	if m.clipboardWritten {
+		clipboard.WriteAll("")
 	}
 	config.ClearMachineSecret()
 	return err

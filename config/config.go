@@ -20,7 +20,7 @@ const configSaltLen = 16
 
 const (
 	// VERSION is the current version of the application.
-	VERSION = "v0.2.4-beta"
+	VERSION = "v0.2.6-beta"
 
 	// AppName is the application name, used for directory and file naming.
 	AppName = "yako"

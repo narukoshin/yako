@@ -112,6 +112,8 @@ type model struct {
 	remoteFocused         int
 	remoteConfirmDelVault bool
 	remoteRegister        bool
+
+	clipboardWritten bool
 }
 
 // Shared lipgloss styles used across all TUI views for consistent theming.

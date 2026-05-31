@@ -36,6 +36,8 @@ func (m model) updateLock(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		m.masterPassword = []byte(pw)
+		m.lockInput.SetValue("")
+		m.lockInput.Reset()
 		m.entries = entries
 		m.lockErrMsg = ""
 

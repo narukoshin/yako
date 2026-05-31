@@ -43,8 +43,9 @@ func (m model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err := clipboard.WriteAll(string(pw)); err != nil {
 				m.detailMsg = errStyle.Render("copy failed")
 			} else {
+				m.clipboardWritten = true
 				m.detailMsg = successStyle.Render("Password copied")
-				time.AfterFunc(45*time.Second, func() { clipboard.WriteAll("") })
+				time.AfterFunc(15*time.Second, func() { clipboard.WriteAll("") })
 			}
 			return m, nil
 		}

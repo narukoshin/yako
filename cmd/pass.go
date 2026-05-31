@@ -77,7 +77,7 @@ var passListCmd = &cobra.Command{
 	},
 }
 
-// passCopyCmd copies the password to the clipboard and schedules automatic clearing after 45 seconds.
+// passCopyCmd copies the password to the clipboard and schedules automatic clearing after 15 seconds.
 var passCopyCmd = &cobra.Command{
 	Use:   "copy <name>",
 	Short: "Copy a password to the clipboard",
@@ -118,16 +118,19 @@ var passGenerateCmd = &cobra.Command{
 }
 
 // unlockVault prompts for the master password, loads all entries, and returns both for subsequent operations.
-func unlockVault() (string, []vault.Entry, error) {
+// Callers must zero the returned byte slice when done.
+func unlockVault() ([]byte, []vault.Entry, error) {
 	pw, err := readPassphrase("Master password: ")
 	if err != nil {
-		return "", nil, err
+		return nil, nil, err
 	}
-	entries, err := vault.Load([]byte(pw))
+	pwBytes := []byte(pw)
+	entries, err := vault.Load(pwBytes)
 	if err != nil {
-		return "", nil, err
+		zeroBytes(pwBytes)
+		return nil, nil, err
 	}
-	return pw, entries, nil
+	return pwBytes, entries, nil
 }
 
 // readLine prints a prompt and reads a full line from stdin (strips trailing newline).
@@ -177,6 +180,7 @@ func runPassAdd(cmd *cobra.Command, name string) error {
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	if _, existing := findEntry(entries, name); existing != nil {
 		return kerr.EntryExists(name)
@@ -206,7 +210,7 @@ func runPassAdd(cmd *cobra.Command, name string) error {
 	entry := vault.NewEntry(name, username, password, url, notes, folder)
 	entries = append(entries, entry)
 
-	if err := vault.Save([]byte(pw), entries); err != nil {
+	if err := vault.Save(pw, entries); err != nil {
 		return err
 	}
 
@@ -290,6 +294,7 @@ func runPassRm(name string) error {
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	idx, _ := findEntry(entries, name)
 	if idx == -1 {
@@ -298,7 +303,7 @@ func runPassRm(name string) error {
 
 	entries = append(entries[:idx], entries[idx+1:]...)
 
-	if err := vault.Save([]byte(pw), entries); err != nil {
+	if err := vault.Save(pw, entries); err != nil {
 		return err
 	}
 
@@ -306,7 +311,7 @@ func runPassRm(name string) error {
 	return nil
 }
 
-// runPassCopy copies the entry's password to the system clipboard and auto-clears it after 45 seconds.
+// runPassCopy copies the entry's password to the system clipboard and auto-clears it after 15 seconds.
 func runPassCopy(name string) error {
 	if !vault.Exists() {
 		return kerr.ErrNoVault
@@ -325,9 +330,9 @@ func runPassCopy(name string) error {
 	if err := clipboard.WriteAll(string(entry.Password)); err != nil {
 		return fmt.Errorf("clipboard: %w", err)
 	}
-	time.AfterFunc(45*time.Second, func() { clipboard.WriteAll("") })
+	time.AfterFunc(15*time.Second, func() { clipboard.WriteAll("") })
 
-	fmt.Printf("Password for %q copied to clipboard (will clear in 45s)\n", name)
+	fmt.Printf("Password for %q copied to clipboard (will clear in 15s)\n", name)
 	return nil
 }
 
@@ -341,6 +346,7 @@ func runPassEdit(cmd *cobra.Command, name string) error {
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	idx, entry := findEntry(entries, name)
 	if entry == nil {
@@ -390,12 +396,19 @@ func runPassEdit(cmd *cobra.Command, name string) error {
 	entries[idx].Folder = folder
 	entries[idx].Updated = entry.Updated
 
-	if err := vault.Save([]byte(pw), entries); err != nil {
+	if err := vault.Save(pw, entries); err != nil {
 		return err
 	}
 
 	fmt.Printf("Updated entry %q\n", name)
 	return nil
+}
+
+// zeroBytes overwrites a byte slice with zeros to prevent sensitive data from lingering in memory.
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 // runPassGenerate prints a cryptographically random password of the requested length.
