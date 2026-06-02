@@ -41,7 +41,9 @@ func loadRemoteConfig() (*remoteConfig, error) {
 		return nil, fmt.Errorf("not logged in; run 'yako remote login <server-url>' first")
 	}
 
-	data, err := ck.Decrypt(config.MachineSecret(), encrypted)
+	ms := config.MachineSecret()
+	data, err := ck.Decrypt(ms, encrypted)
+	ck.ZeroBytes(ms)
 	if err != nil {
 		return nil, kerr.ErrCorrupted
 	}
@@ -63,7 +65,9 @@ func saveRemoteConfig(rc *remoteConfig) error {
 		return err
 	}
 
-	encrypted, err := ck.Encrypt(config.MachineSecret(), data)
+	ms := config.MachineSecret()
+	encrypted, err := ck.Encrypt(ms, data)
+	ck.ZeroBytes(ms)
 	if err != nil {
 		return err
 	}
@@ -93,7 +97,9 @@ func saveAdminConfig(rc *adminRemoteConfig) error {
 		return err
 	}
 
-	encrypted, err := ck.Encrypt(config.MachineSecret(), data)
+	ms := config.MachineSecret()
+	encrypted, err := ck.Encrypt(ms, data)
+	ck.ZeroBytes(ms)
 	if err != nil {
 		return err
 	}
@@ -111,7 +117,9 @@ func loadAdminConfig() (*adminRemoteConfig, error) {
 		return nil, err
 	}
 
-	data, err := ck.Decrypt(config.MachineSecret(), encrypted)
+	ms := config.MachineSecret()
+	data, err := ck.Decrypt(ms, encrypted)
+	ck.ZeroBytes(ms)
 	if err != nil {
 		return nil, kerr.ErrCorrupted
 	}
@@ -168,7 +176,9 @@ func resolveAdminServerURL() (string, error) {
 
 	raw, err := os.ReadFile(remoteConfigPath())
 	if err == nil {
-		data, err := ck.Decrypt(config.MachineSecret(), raw)
+		ms := config.MachineSecret()
+		data, err := ck.Decrypt(ms, raw)
+		ck.ZeroBytes(ms)
 		if err == nil {
 			var urc remoteConfig
 			if json.Unmarshal(data, &urc) == nil && urc.ServerURL != "" {
@@ -192,10 +202,11 @@ func adminLoginFlow(serverURL string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	defer ck.ZeroBytes(password)
 
 	body, _ := json.Marshal(map[string]string{
 		"username": username,
-		"password": password,
+		"password": string(password),
 	})
 
 	resp, err := http.Post(apiURL(serverURL, "/auth/login"), "application/json", bytes.NewReader(body))
@@ -419,10 +430,11 @@ func runRemoteLogin(serverURL string) error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(password)
 
 	body, _ := json.Marshal(map[string]string{
 		"username": username,
-		"password": password,
+		"password": string(password),
 	})
 
 	resp, err := http.Post(apiURL(serverURL, "/auth/login"), "application/json", bytes.NewReader(body))
@@ -468,6 +480,7 @@ func runRemoteRegister(serverURL string) error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(password)
 	inviteCode, err := readLine("Invite code: ")
 	if err != nil {
 		return err
@@ -475,7 +488,7 @@ func runRemoteRegister(serverURL string) error {
 
 	body, _ := json.Marshal(map[string]string{
 		"username":    username,
-		"password":    password,
+		"password":    string(password),
 		"invite_code": inviteCode,
 	})
 
@@ -527,8 +540,9 @@ func runRemotePush() error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(pw)
 
-	entries, err := vault.Load([]byte(pw))
+	entries, err := vault.Load(pw)
 	if err != nil {
 		return err
 	}
@@ -604,15 +618,16 @@ func runRemotePull() error {
 		if err != nil {
 			return err
 		}
+		defer ck.ZeroBytes(pw)
 
-		serverEntries, err := vault.LoadPath(tmpPath, []byte(pw))
+		serverEntries, err := vault.LoadPath(tmpPath, pw)
 		if err != nil {
 			return fmt.Errorf("server vault is incompatible: %w", err)
 		}
 
 		merged := vault.MergeEntries(entries, serverEntries)
 
-		if err := vault.Save([]byte(pw), merged); err != nil {
+		if err := vault.Save(pw, merged); err != nil {
 			return fmt.Errorf("save merged vault: %w", err)
 		}
 		fmt.Printf("Vault merged (%d server + %d local = %d total)\n", len(serverEntries), len(merged)-len(serverEntries), len(merged))
@@ -642,6 +657,13 @@ func runRemotePullRecovery(data []byte) error {
 
 		resp, err := doRequestWithRefresh("POST", apiURL(rc.ServerURL, "/recover"),
 			[]byte(`{"phrase":"`+phrase+`"}`), rc)
+		// Zero the phrase in the request buffer
+		for i := 0; i < len(phrase) && i < 512; i++ {
+			phraseBytes := []byte(phrase)
+			for j := range phraseBytes {
+				phraseBytes[j] = 0
+			}
+		}
 		if err != nil {
 			return fmt.Errorf("recover request: %w", err)
 		}
@@ -682,9 +704,10 @@ merge:
 		if err != nil {
 			return err
 		}
+		defer ck.ZeroBytes(pw)
 
 		merged := vault.MergeEntries(entries, serverEntries)
-		if err := vault.Save([]byte(pw), merged); err != nil {
+		if err := vault.Save(pw, merged); err != nil {
 			return fmt.Errorf("save merged vault: %w", err)
 		}
 		fmt.Printf("Vault merged (%d server + %d local = %d total)\n", len(serverEntries), len(merged)-len(serverEntries), len(merged))
@@ -693,7 +716,8 @@ merge:
 		if err != nil {
 			return err
 		}
-		if err := vault.Save([]byte(pw), serverEntries); err != nil {
+		defer ck.ZeroBytes(pw)
+		if err := vault.Save(pw, serverEntries); err != nil {
 			return fmt.Errorf("save vault: %w", err)
 		}
 		fmt.Println("Vault recovered")

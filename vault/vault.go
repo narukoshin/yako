@@ -83,8 +83,12 @@ func Exists() bool {
 //	it without this machine. You're bound to me whether you like it or not.
 func deriveKey(password []byte, salt []byte) []byte {
 	machineKey := config.MachineSecret()
-	combined := append(salt, machineKey...)
-	return ck.DeriveKey(password, combined)
+	combined := make([]byte, len(salt)+len(machineKey))
+	copy(combined, salt)
+	copy(combined[len(salt):], machineKey)
+	key := ck.DeriveKey(password, combined)
+	ck.ZeroBytes(machineKey)
+	return key
 }
 
 // lockoutBytes serializes a LockoutState (attempts + timestamp + HMAC) into 41 bytes.
@@ -97,7 +101,9 @@ func lockoutBytes(lo *kerr.LockoutState) []byte {
 	}
 	buf[0] = byte(lo.Attempts)
 	binary.BigEndian.PutUint64(buf[1:9], uint64(lo.LastFailure.UnixNano()))
-	lo.HMAC = kerr.SignLockout(lo, config.MachineSecret())
+	ms := config.MachineSecret()
+	lo.HMAC = kerr.SignLockout(lo, ms)
+	ck.ZeroBytes(ms)
 	copy(buf[9:41], lo.HMAC)
 	return buf
 }
@@ -132,7 +138,10 @@ func parseHeader(data []byte) (mainSalt, recSalt []byte, lo *kerr.LockoutState, 
 		LastFailure: time.Unix(0, int64(binary.BigEndian.Uint64(data[33:41]))),
 		HMAC:        data[41:73],
 	}
-	if !kerr.VerifyLockout(lo, config.MachineSecret()) {
+	ms := config.MachineSecret()
+	ok := kerr.VerifyLockout(lo, ms)
+	ck.ZeroBytes(ms)
+	if !ok {
 		return nil, nil, nil, nil, nil, kerr.ErrCorrupted
 	}
 	if len(data) >= headerFixedLen {
@@ -202,6 +211,7 @@ func extractCodeFromVault(password []byte) (string, error) {
 	}
 
 	passwordKey := ck.DeriveKey(password, recSalt)
+	defer ck.ZeroBytes(passwordKey)
 	codeBytes, err := ck.Decrypt(passwordKey, env.CodeEnvelope)
 	if err != nil {
 		return "", kerr.ErrWrongPassword
@@ -260,6 +270,7 @@ func saveWith(password []byte, entries []Entry, code string) error {
 	}
 
 	key := deriveKey(password, mainSalt)
+	defer ck.ZeroBytes(key)
 
 	plaintext, err := json.Marshal(entries)
 	if err != nil {
@@ -275,6 +286,8 @@ func saveWith(password []byte, entries []Entry, code string) error {
 	if code != "" {
 		passwordKey := ck.DeriveKey(password, recSalt)
 		codeKey := ck.DeriveKey([]byte(code), recSalt)
+		defer ck.ZeroBytes(passwordKey)
+		defer ck.ZeroBytes(codeKey)
 
 		codeEnvelope, err := ck.Encrypt(passwordKey, []byte(code))
 		if err != nil {
@@ -296,6 +309,7 @@ func saveWith(password []byte, entries []Entry, code string) error {
 		}
 	} else {
 		recKey := ck.DeriveKey(password, recSalt)
+		defer ck.ZeroBytes(recKey)
 		recovery, err = ck.Encrypt(recKey, plaintext)
 		if err != nil {
 			return fmt.Errorf("save vault: %w", err)
@@ -306,7 +320,9 @@ func saveWith(password []byte, entries []Entry, code string) error {
 	if err != nil {
 		return fmt.Errorf("save vault: %w", err)
 	}
-	mac := hmac.New(sha256.New, password)
+	verifyKey := deriveKey(password, verifySalt)
+	defer ck.ZeroBytes(verifyKey)
+	mac := hmac.New(sha256.New, verifyKey)
 	mac.Write(verifySalt)
 	mac.Write(plaintext)
 	verifyHash := mac.Sum(nil)
@@ -360,6 +376,7 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 	}
 
 	key := deriveKey(password, mainSalt)
+	defer ck.ZeroBytes(key)
 	plaintext, err := ck.Decrypt(key, data[payloadStart:payloadEnd])
 	if err != nil {
 		kerr.RecordFailure(lo)
@@ -369,11 +386,20 @@ func LoadPath(path string, password []byte) ([]Entry, error) {
 	}
 
 	if verifySalt != nil && verifyHash != nil {
-		mac := hmac.New(sha256.New, password)
+		verifyKey := deriveKey(password, verifySalt)
+		mac := hmac.New(sha256.New, verifyKey)
 		mac.Write(verifySalt)
 		mac.Write(plaintext)
-		if !hmac.Equal(mac.Sum(nil), verifyHash) {
-			return nil, kerr.ErrCorrupted
+		ok := hmac.Equal(mac.Sum(nil), verifyHash)
+		ck.ZeroBytes(verifyKey)
+		if !ok {
+			// Fall back to old-format HMAC (raw password) for backward compat
+			mac2 := hmac.New(sha256.New, password)
+			mac2.Write(verifySalt)
+			mac2.Write(plaintext)
+			if !hmac.Equal(mac2.Sum(nil), verifyHash) {
+				return nil, kerr.ErrCorrupted
+			}
 		}
 	}
 
@@ -402,6 +428,7 @@ func LoadRecoveryWithCodeData(data []byte, code string) ([]Entry, error) {
 	}
 
 	codeKey := ck.DeriveKey([]byte(code), recSalt)
+	defer ck.ZeroBytes(codeKey)
 	plaintext, err := ck.Decrypt(codeKey, env.EntriesEnvelope)
 	if err != nil {
 		return nil, kerr.ErrWrongPassword

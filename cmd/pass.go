@@ -120,11 +120,10 @@ var passGenerateCmd = &cobra.Command{
 // unlockVault prompts for the master password, loads all entries, and returns both for subsequent operations.
 // Callers must zero the returned byte slice when done.
 func unlockVault() ([]byte, []vault.Entry, error) {
-	pw, err := readPassphrase("Master password: ")
+	pwBytes, err := readPassphrase("Master password: ")
 	if err != nil {
 		return nil, nil, err
 	}
-	pwBytes := []byte(pw)
 	entries, err := vault.Load(pwBytes)
 	if err != nil {
 		zeroBytes(pwBytes)
@@ -195,13 +194,14 @@ func runPassAdd(cmd *cobra.Command, name string) error {
 		}
 		fmt.Printf("Generated password (%d chars)\n", passLenFlag)
 	} else {
-		password, err = readPassphrase("Password: ")
+		pwBytes, err := readPassphrase("Password: ")
 		if err != nil {
 			return err
 		}
-		if password == "" {
+		if len(pwBytes) == 0 {
 			return kerr.ErrEmptyPassword
 		}
+		password = string(pwBytes)
 	}
 	url, _ := readLine("URL: ")
 	notes, _ := readLine("Notes: ")
@@ -224,10 +224,11 @@ func runPassGet(name string) error {
 		return kerr.ErrNoVault
 	}
 
-	_, entries, err := unlockVault()
+	pw, entries, err := unlockVault()
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	_, entry := findEntry(entries, name)
 	if entry == nil {
@@ -262,10 +263,11 @@ func runPassList() error {
 		return kerr.ErrNoVault
 	}
 
-	_, entries, err := unlockVault()
+	pw, entries, err := unlockVault()
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	if len(entries) == 0 {
 		fmt.Println("No entries in vault")
@@ -317,10 +319,11 @@ func runPassCopy(name string) error {
 		return kerr.ErrNoVault
 	}
 
-	_, entries, err := unlockVault()
+	pw, entries, err := unlockVault()
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(pw)
 
 	_, entry := findEntry(entries, name)
 	if entry == nil {

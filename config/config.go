@@ -20,7 +20,7 @@ const configSaltLen = 16
 
 const (
 	// VERSION is the current version of the application.
-	VERSION = "v0.2.6-beta"
+	VERSION = "v0.2.7-beta"
 
 	// AppName is the application name, used for directory and file naming.
 	AppName = "yako"
@@ -127,7 +127,9 @@ func generateMachineID() string {
 	if _, err := rand.Read(b); err != nil {
 		return ""
 	}
-	return hex.EncodeToString(b)
+	id := hex.EncodeToString(b)
+	ck.ZeroBytes(b)
+	return id
 }
 
 // MachineID returns your machine's unique identifier — cached, persisted, or freshly generated.
@@ -213,6 +215,7 @@ func LoadConfig() (*Config, error) {
 	salt := data[:configSaltLen]
 	key := configKey(salt)
 	plaintext, err := ck.Decrypt(key, data[configSaltLen:])
+	ck.ZeroBytes(key)
 	if err != nil {
 		return cfg, nil
 	}
@@ -240,6 +243,7 @@ func SaveConfig(cfg *Config) error {
 
 	key := configKey(salt)
 	encrypted, err := ck.Encrypt(key, plaintext)
+	ck.ZeroBytes(key)
 	if err != nil {
 		return fmt.Errorf("config encrypt: %w", err)
 	}

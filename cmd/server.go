@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	ck "github.com/narukoshin/yako/v1/crypto"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -101,10 +102,12 @@ func runServerStart(cmd *cobra.Command) error {
 			if adminUser == "" {
 				return fmt.Errorf("admin username required")
 			}
-			adminPass, err = readPassphrase("Admin password: ")
+			passBytes, err := readPassphrase("Admin password: ")
 			if err != nil {
 				return err
 			}
+			adminPass = string(passBytes)
+			ck.ZeroBytes(passBytes)
 			if adminPass == "" {
 				return fmt.Errorf("admin password required")
 			}

@@ -103,14 +103,15 @@ var keyRemoveCmd = &cobra.Command{
 }
 
 // readPassphrase reads a password from the terminal without echoing (uses term.ReadPassword).
-func readPassphrase(prompt string) (string, error) {
+// Returns zeroable bytes — wipe them when you're done.
+func readPassphrase(prompt string) ([]byte, error) {
 	fmt.Fprint(os.Stderr, prompt)
 	bytes, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
-		return "", fmt.Errorf("read input: %w", err)
+		return nil, fmt.Errorf("read input: %w", err)
 	}
-	return string(bytes), nil
+	return bytes, nil
 }
 
 // runKeyGenerate generates a new X25519 keypair, optionally encrypts the private key with a
@@ -131,22 +132,25 @@ func runKeyGenerate() error {
 		return err
 	}
 
-	if pass != "" {
+	if len(pass) > 0 {
 		confirm, err := readPassphrase("Confirm passphrase: ")
 		if err != nil {
 			return err
 		}
-		if pass != confirm {
+		if string(pass) != string(confirm) {
+			ck.ZeroBytes(confirm)
 			return kerr.ErrPassMismatch
 		}
+		ck.ZeroBytes(confirm)
 
 		salt, err := ck.GenerateSalt()
 		if err != nil {
 			return err
 		}
 
-		key := ck.DeriveKey([]byte(pass), salt)
+		key := ck.DeriveKey(pass, salt)
 		encrypted, err := ck.Encrypt(key, priv)
+		ck.ZeroBytes(key)
 		if err != nil {
 			return err
 		}
@@ -158,6 +162,7 @@ func runKeyGenerate() error {
 		if err := os.WriteFile(config.IdentityPath(), blob, 0600); err != nil {
 			return fmt.Errorf("write identity: %w", err)
 		}
+		ck.ZeroBytes(pass)
 	} else {
 		if err := os.WriteFile(config.IdentityPath(), priv, 0600); err != nil {
 			return fmt.Errorf("write identity: %w", err)
@@ -304,12 +309,11 @@ func loadPrivateKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer ck.ZeroBytes(pw)
 
-	key := ck.DeriveKey([]byte(pw), salt)
+	key := ck.DeriveKey(pw, salt)
+	defer ck.ZeroBytes(key)
 	priv, err := ck.Decrypt(key, ciphertext)
-	for i := range key {
-		key[i] = 0
-	}
 	if err != nil {
 		return nil, kerr.ErrWrongPassword
 	}

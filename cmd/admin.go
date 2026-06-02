@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	ck "github.com/narukoshin/yako/v1/crypto"
 	"github.com/narukoshin/yako/v1/kerr"
 	"github.com/narukoshin/yako/v1/vault"
 )
@@ -57,8 +58,9 @@ func runChangePassword() error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(current)
 
-	entries, err := vault.Load([]byte(current))
+	entries, err := vault.Load(current)
 	if err != nil {
 		return err
 	}
@@ -67,8 +69,9 @@ func runChangePassword() error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(newPW)
 
-	if err := vault.Save([]byte(newPW), entries); err != nil {
+	if err := vault.Save(newPW, entries); err != nil {
 		return fmt.Errorf("change password: %w", err)
 	}
 
@@ -122,7 +125,8 @@ func recoverVaultSetNewPassword(entries []vault.Entry) error {
 	if err != nil {
 		return err
 	}
-	if err := vault.Save([]byte(pw), entries); err != nil {
+	defer ck.ZeroBytes(pw)
+	if err := vault.Save(pw, entries); err != nil {
 		return fmt.Errorf("re-encrypt vault: %w", err)
 	}
 	fmt.Println("Vault recovered for this machine")
@@ -139,8 +143,9 @@ func runGenerateRecovery() error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(pw)
 
-	code, err := vault.RegenerateRecovery([]byte(pw))
+	code, err := vault.RegenerateRecovery(pw)
 	if err != nil {
 		return err
 	}
@@ -166,6 +171,7 @@ func runExportVault() error {
 	if err != nil {
 		return fmt.Errorf("read password: %w", err)
 	}
+	defer ck.ZeroBytes(pwBytes)
 
 	entries, err := vault.Load(pwBytes)
 	if err != nil {

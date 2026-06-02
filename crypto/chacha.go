@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"runtime"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -26,6 +27,15 @@ func Encrypt(key []byte, plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("chacha: nonce: %w", err)
 	}
 	return aead.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+// ZeroBytes securely zeroes a byte slice to prevent sensitive data from lingering in memory.
+// Use with defer right after allocation — the compiler won't elide this thanks to runtime.KeepAlive.
+func ZeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
 }
 
 // Decrypt opens a ciphertext created by [Encrypt]. Get the key right or get nothing —

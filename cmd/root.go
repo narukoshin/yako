@@ -24,6 +24,7 @@ encryption — all with a single master password.`,
 
 // Execute starts the CLI. Cobra root runs, then we die on error. Simple, like my devotion to you.
 func Execute() {
+	defer config.ClearMachineSecret()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

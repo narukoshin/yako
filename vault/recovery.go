@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
+
+	ck "github.com/narukoshin/yako/v1/crypto"
 )
 
 // BIP39 recovery phrase parameters: 128 bits of entropy + 4 checksum bits = 132 bits → 15 words.
@@ -252,6 +254,7 @@ func GenerateRecoveryPhrase() (string, error) {
 	if _, err := rand.Read(entropy); err != nil {
 		return "", fmt.Errorf("generate recovery phrase: %w", err)
 	}
+	defer ck.ZeroBytes(entropy)
 
 	hash := sha256.Sum256(entropy)
 	checksum := hash[0] >> (8 - checksumBits)
@@ -259,6 +262,7 @@ func GenerateRecoveryPhrase() (string, error) {
 	totalBits := recoveryEntropyBytes*8 + checksumBits
 	totalBytes := (totalBits + 7) / 8
 	buffer := make([]byte, totalBytes)
+	defer ck.ZeroBytes(buffer)
 	copy(buffer, entropy)
 	buffer[recoveryEntropyBytes] = checksum << (8 - checksumBits)
 

@@ -9,29 +9,32 @@ import (
 	"strings"
 	"time"
 
+	ck "github.com/narukoshin/yako/v1/crypto"
 	"github.com/narukoshin/yako/v1/kerr"
 )
 
 // readAndConfirmPassword prompts twice, validates strength, and checks that both entries match before returning.
 // Uses [readPassphrase] for masked input under the hood.
-func readAndConfirmPassword(prompt, confirmPrompt string) (string, error) {
+func readAndConfirmPassword(prompt, confirmPrompt string) ([]byte, error) {
 	pw, err := readPassphrase(prompt)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if pw == "" {
-		return "", kerr.ErrEmptyPassword
+	if len(pw) == 0 {
+		return nil, kerr.ErrEmptyPassword
 	}
-	if err := checkPasswordStrength(pw); err != nil {
-		return "", err
+	if err := checkPasswordStrength(string(pw)); err != nil {
+		return nil, err
 	}
 	confirm, err := readPassphrase(confirmPrompt)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if pw != confirm {
-		return "", kerr.ErrPassMismatch
+	if string(pw) != string(confirm) {
+		ck.ZeroBytes(confirm)
+		return nil, kerr.ErrPassMismatch
 	}
+	ck.ZeroBytes(confirm)
 	return pw, nil
 }
 

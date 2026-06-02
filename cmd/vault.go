@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/narukoshin/yako/v1/config"
+	ck "github.com/narukoshin/yako/v1/crypto"
 	"github.com/narukoshin/yako/v1/kerr"
 	"github.com/narukoshin/yako/v1/vault"
 )
@@ -53,8 +54,9 @@ func runVaultInit() error {
 	if err != nil {
 		return err
 	}
+	defer ck.ZeroBytes(pw)
 
-	code, err := vault.InitWithRecovery([]byte(pw))
+	code, err := vault.InitWithRecovery(pw)
 	if err != nil {
 		return err
 	}

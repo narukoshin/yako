@@ -102,8 +102,11 @@ func EncryptAsymmetricMulti(recipientPublics [][]byte, plaintext []byte) ([]byte
 			return nil, err
 		}
 
-		wrappingKey := deriveWrappingKey(shared, ephemeralPublic)
+		wrappingKey, err := deriveWrappingKey(shared, ephemeralPublic)
 		zero(shared)
+		if err != nil {
+			return nil, fmt.Errorf("x25519: wrap key: %w", err)
+		}
 
 		wrapped, err := Encrypt(wrappingKey, fileKey)
 		zero(wrappingKey)
@@ -169,8 +172,11 @@ func DecryptAsymmetric(privateKey, ciphertext []byte) ([]byte, error) {
 			continue
 		}
 
-		wrappingKey := deriveWrappingKey(shared, ephemeralPublic)
+		wrappingKey, err := deriveWrappingKey(shared, ephemeralPublic)
 		zero(shared)
+		if err != nil {
+			continue
+		}
 
 		fk, err := Decrypt(wrappingKey, wrappedKey)
 		zero(wrappingKey)
@@ -202,13 +208,13 @@ func DecryptAsymmetric(privateKey, ciphertext []byte) ([]byte, error) {
 
 // deriveWrappingKey derives an AEAD key from an X25519 shared secret using HKDF-SHA256.
 // Context binds the key to the ephemeral public key — uniqueness without monotony.
-func deriveWrappingKey(sharedSecret, context []byte) []byte {
+func deriveWrappingKey(sharedSecret, context []byte) ([]byte, error) {
 	h := hkdf.New(sha256.New, sharedSecret, context, []byte("yako-wrap-v1"))
 	key := make([]byte, SharedKeySize)
 	if _, err := io.ReadFull(h, key); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("x25519: derive wrapping key: %w", err)
 	}
-	return key
+	return key, nil
 }
 
 // Fingerprint returns a short hex digest (first 8 bytes of SHA256) of a public key.
