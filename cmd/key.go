@@ -62,11 +62,11 @@ var keyFingerprintCmd = &cobra.Command{
 
 // keyImportCmd imports a public key into the keyring by name.
 var keyImportCmd = &cobra.Command{
-	Use:   "import <name> [<file>]",
+	Use:   "import <name> <pubkey>",
 	Short: "Import a public key into the keyring",
 	Long: `Import a public key and assign it a name for use with 'yako encrypt -r <name>'.
-If no file is given, reads the public key from stdin.`,
-	Args: cobra.RangeArgs(1, 2),
+The pubkey is a base64-encoded X25519 public key.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(_ *cobra.Command, args []string) error {
 		return runKeyImport(args)
 	},
@@ -182,27 +182,11 @@ func runKeyGenerate() error {
 	return nil
 }
 
-// runKeyImport imports a public key from a file or stdin into the keyring with the given name.
+// runKeyImport imports a base64-encoded public key into the keyring with the given name.
 func runKeyImport(args []string) error {
 	name := args[0]
 
-	var pubData []byte
-	if len(args) > 1 {
-		var err error
-		pubData, err = os.ReadFile(args[1])
-		if err != nil {
-			return fmt.Errorf("read key file: %w", err)
-		}
-	} else {
-		pubDataStr, err := readLine("Public key (base64): ")
-		if err != nil {
-			return err
-		}
-		pubData = []byte(pubDataStr)
-	}
-
-	pubData = []byte(pubData)
-	pub, err := base64.StdEncoding.DecodeString(string(pubData))
+	pub, err := base64.StdEncoding.DecodeString(args[1])
 	if err != nil {
 		return kerr.ErrInvalidKey
 	}
