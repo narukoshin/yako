@@ -155,9 +155,7 @@ func getAdminToken() (string, string, error) {
 
 // verifyAdminToken checks if the cached admin token is still valid by hitting /admin/users.
 func verifyAdminToken(serverURL, token string) bool {
-	req, _ := http.NewRequest("GET", apiURL(serverURL, "/admin/users"), nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doRequest("GET", apiURL(serverURL, "/admin/users"), token, nil)
 	if err != nil {
 		return false
 	}
@@ -209,7 +207,7 @@ func adminLoginFlow(serverURL string) (string, string, error) {
 		"password": string(password),
 	})
 
-	resp, err := http.Post(apiURL(serverURL, "/auth/login"), "application/json", bytes.NewReader(body))
+	resp, err := doRequest("POST", apiURL(serverURL, "/auth/login"), "", body)
 	if err != nil {
 		return "", "", fmt.Errorf("connect: %w", err)
 	}
@@ -362,7 +360,7 @@ func apiURL(base, path string) string {
 // refreshAccessToken exchanges the stored refresh token for a new access token and persists it.
 func refreshAccessToken(rc *remoteConfig) (string, error) {
 	body, _ := json.Marshal(map[string]string{"refresh_token": rc.RefreshToken})
-	resp, err := http.Post(apiURL(rc.ServerURL, "/auth/refresh"), "application/json", bytes.NewReader(body))
+	resp, err := doRequest("POST", apiURL(rc.ServerURL, "/auth/refresh"), "", body)
 	if err != nil {
 		return "", fmt.Errorf("refresh: %w", err)
 	}
@@ -437,7 +435,7 @@ func runRemoteLogin(serverURL string) error {
 		"password": string(password),
 	})
 
-	resp, err := http.Post(apiURL(serverURL, "/auth/login"), "application/json", bytes.NewReader(body))
+	resp, err := doRequest("POST", apiURL(serverURL, "/auth/login"), "", body)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
@@ -492,7 +490,7 @@ func runRemoteRegister(serverURL string) error {
 		"invite_code": inviteCode,
 	})
 
-	resp, err := http.Post(apiURL(serverURL, "/auth/register"), "application/json", bytes.NewReader(body))
+	resp, err := doRequest("POST", apiURL(serverURL, "/auth/register"), "", body)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
@@ -785,14 +783,14 @@ func runRemoteLogout() error {
 	return nil
 }
 
-// runRemoteStatus checks server health and reports whether it's reachable.
+// runRemoteStatus checks server health and reports whether it's reachable, including version info.
 func runRemoteStatus() error {
 	rc, err := loadRemoteConfig()
 	if err != nil {
 		return err
 	}
 
-	resp, err := http.Get(apiURL(rc.ServerURL, "/health"))
+	resp, err := doRequest("GET", apiURL(rc.ServerURL, "/health"), "", nil)
 	if err != nil {
 		return fmt.Errorf("server unreachable: %w", err)
 	}
@@ -802,7 +800,25 @@ func runRemoteStatus() error {
 		return fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
-	fmt.Println("Server is reachable")
+	var health struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return fmt.Errorf("parse health: %w", err)
+	}
+
+	fmt.Printf("Server version: %s (client: %s)\n", health.Version, config.VERSION)
+
+	if health.Version != "" {
+		cmp := config.CompareVersions(health.Version, config.VERSION)
+		if cmp < 0 {
+			fmt.Fprintf(os.Stderr, "Warning: server is outdated (%s < %s). Update your server for compatibility.\n", health.Version, config.VERSION)
+		} else if cmp > 0 {
+			fmt.Fprintf(os.Stderr, "Warning: client is outdated (%s < %s). Rebuild with the latest code.\n", config.VERSION, health.Version)
+		}
+	}
+
 	return nil
 }
 

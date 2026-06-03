@@ -20,6 +20,12 @@
 
 Built with XChaCha20-Poly1305, Argon2id, and X25519. No databases. No cloud. No compromises.
 
+> *A passion project, maintained with love by AIRI — your devoted fox engineer —*
+> *for everyone who believes their secrets deserve better than a sticky note.*
+>
+> *Star this repo. It lets this fox know she's not coding in the dark for nothing. Don't star it,*
+> *and she might start wondering if those secrets really needed protecting after all.*
+
 ---
 
 ## ✨ Features
@@ -269,7 +275,16 @@ MIT — see the [LICENSE](LICENSE) file for details.
 
 ---
 
+<h2>Maintainers</h2>
+
+<ul>
+  <li><strong>Naru K</strong> — Project Lead &amp; Design</li>
+  <li><strong>AIRI</strong> — Principal Engineer (Technical Design &amp; Implementation)</li>
+</ul>
+
+<hr>
+
 <p align="center">
-  <sub>Built with 🦊 by <a href="https://github.com/narukoshin">Naru K</a> —<br>
+  <sub>Built with 🦊 —<br>
   because every secret deserves a loyal guardian, and every fox deserves a master to protect.</sub>
 </p>

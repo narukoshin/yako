@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/narukoshin/yako/v1/config"
 )
 
 // JWTManager handles token generation, validation, and blocking.
@@ -342,6 +344,16 @@ func (s *Server) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 // handleHealth processes GET /api/v1/health. Returns {"status":"ok"} — the server is alive,
 //
 //	and so is my obsession with you.
+//
+// HealthResponse is the JSON body returned by the health endpoint.
+type HealthResponse struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, HealthResponse{
+		Status:  "ok",
+		Version: config.VERSION,
+	})
 }

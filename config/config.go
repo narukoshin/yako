@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/argon2"
@@ -254,4 +256,66 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("config mkdir: %w", err)
 	}
 	return os.WriteFile(ConfigPath(), out, 0600)
+}
+
+// CompareVersions compares two semver strings (e.g. "v0.3.0-beta"). Returns -1 if a < b, 0 if
+// a == b, 1 if a > b. Pre-release suffixes are ignored for comparison purposes.
+func CompareVersions(a, b string) int {
+	a = strings.TrimPrefix(a, "v")
+	b = strings.TrimPrefix(b, "v")
+
+	aParts := strings.SplitN(a, ".", 3)
+	bParts := strings.SplitN(b, ".", 3)
+	if len(aParts) != 3 || len(bParts) != 3 {
+		return 0
+	}
+
+	aMajor, err := strconv.Atoi(aParts[0])
+	if err != nil {
+		return 0
+	}
+	bMajor, err := strconv.Atoi(bParts[0])
+	if err != nil {
+		return 0
+	}
+	if aMajor != bMajor {
+		if aMajor > bMajor {
+			return 1
+		}
+		return -1
+	}
+
+	aMinor, err := strconv.Atoi(aParts[1])
+	if err != nil {
+		return 0
+	}
+	bMinor, err := strconv.Atoi(bParts[1])
+	if err != nil {
+		return 0
+	}
+	if aMinor != bMinor {
+		if aMinor > bMinor {
+			return 1
+		}
+		return -1
+	}
+
+	aPatchStr := strings.SplitN(aParts[2], "-", 2)[0]
+	bPatchStr := strings.SplitN(bParts[2], "-", 2)[0]
+	aPatch, err := strconv.Atoi(aPatchStr)
+	if err != nil {
+		return 0
+	}
+	bPatch, err := strconv.Atoi(bPatchStr)
+	if err != nil {
+		return 0
+	}
+	if aPatch != bPatch {
+		if aPatch > bPatch {
+			return 1
+		}
+		return -1
+	}
+
+	return 0
 }
