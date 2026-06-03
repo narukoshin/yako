@@ -264,7 +264,6 @@ golangci-lint run
 ```
 go.module: github.com/narukoshin/yako/v1
 branch:    dev
-tag:       v0.3.0-beta
 ```
 
 ---
