@@ -27,6 +27,18 @@ func Wrap(err error, msg string) error {
 }
 
 var (
+	ErrInvalidWordCount = &Error{
+		Code:    "INVALID_WORD_COUNT",
+		Message: "recovery phrase has the wrong number of words",
+	}
+	ErrUnknownWord = &Error{
+		Code:    "UNKNOWN_WORD",
+		Message: "recovery phrase contains an unknown word",
+	}
+	ErrChecksumMismatch = &Error{
+		Code:    "CHECKSUM_MISMATCH",
+		Message: "recovery phrase checksum does not match",
+	}
 	ErrWrongPassword = &Error{
 		Code:    "WRONG_PASSWORD",
 		Message: "wrong password",

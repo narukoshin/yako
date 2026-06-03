@@ -150,13 +150,18 @@ func (s *Server) handleRecoverVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if vault.VerifyRecoveryCode(data, req.Phrase) {
+	if err := vault.VerifyRecoveryCode(data, req.Phrase); err == nil {
 		s.recoveryTracker.resetAttempts(userID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 
 	attempts := s.recoveryTracker.recordAttempt(userID)
+	writeRecoveryResponse(w, s.store, userID, attempts)
+}
+
+// writeRecoveryResponse sends the appropriate response based on the number of failed recovery attempts.
+func writeRecoveryResponse(w http.ResponseWriter, st *Store, userID string, attempts int) {
 	switch attempts {
 	case 1:
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -171,7 +176,7 @@ func (s *Server) handleRecoverVault(w http.ResponseWriter, r *http.Request) {
 			"attempts": 2,
 		})
 	default:
-		s.store.DeleteVault(userID)
+		st.DeleteVault(userID)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":   "destroyed",
 			"message":  "That's your last chance! I'm deleting your data forever!",

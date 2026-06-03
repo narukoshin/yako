@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -93,7 +92,8 @@ func (s *Server) handleAdminRevokeInvite(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.store.DeleteInviteCode(code); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		log.Printf("error deleting invite code %q: %v", code, err)
+		writeError(w, http.StatusNotFound, "invite code not found")
 		return
 	}
 
@@ -147,6 +147,17 @@ func (s *Server) handleAdminUnbanUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	adminID := r.Context().Value(ctxKeyUserID).(string)
+	admin, err := s.store.GetUser(adminID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get admin")
+		return
+	}
+	if admin.Username == username {
+		writeError(w, http.StatusBadRequest, "cannot unban yourself")
+		return
+	}
+
 	user, err := s.store.FindUser(username)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
@@ -194,8 +205,13 @@ func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		log.Printf("warning: failed to delete vault for %s: %v", username, err)
 	}
 
+	if err := s.store.DeleteUserRefreshTokens(user.ID); err != nil {
+		log.Printf("warning: failed to delete refresh tokens for %s: %v", username, err)
+	}
+
 	if err := s.store.DeleteUser(username); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete user: %v", err))
+		log.Printf("error deleting user %q: %v", username, err)
+		writeError(w, http.StatusInternalServerError, "delete user")
 		return
 	}
 
@@ -215,7 +231,8 @@ func (s *Server) handleAdminDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.Destroy(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("destroy: %v", err))
+		log.Printf("error destroying server data: %v", err)
+		writeError(w, http.StatusInternalServerError, "destroy failed")
 		return
 	}
 

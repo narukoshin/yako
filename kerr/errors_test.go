@@ -21,6 +21,10 @@ func TestSentinelErrors(t *testing.T) {
 		{ErrPassMismatch, "PASS_MISMATCH", "passwords do not match"},
 		{ErrInvalidKey, "INVALID_KEY", "invalid public key"},
 		{ErrNoRecipient, "NO_RECIPIENT", "specify --recipient or --self"},
+		{ErrBothFlags, "BOTH_FLAGS", "use --recipient or --self, not both"},
+		{ErrInvalidWordCount, "INVALID_WORD_COUNT", "recovery phrase has the wrong number of words"},
+		{ErrUnknownWord, "UNKNOWN_WORD", "recovery phrase contains an unknown word"},
+		{ErrChecksumMismatch, "CHECKSUM_MISMATCH", "recovery phrase checksum does not match"},
 	}
 
 	for _, tt := range tests {

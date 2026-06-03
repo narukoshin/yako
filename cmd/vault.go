@@ -63,7 +63,7 @@ func runVaultInit() error {
 
 	fmt.Println("Vault initialized at", config.VaultPath())
 	fmt.Println()
-	fmt.Println("RECOVERY PHRASE (12 words):")
+	fmt.Printf("RECOVERY PHRASE (%d words):\n", vault.PhraseWords)
 	fmt.Println(code)
 	fmt.Println()
 	fmt.Println("Write this down and keep it safe. It can recover your vault")
@@ -95,24 +95,37 @@ func runVaultDestroy() error {
 	rcPath := remoteConfigPath()
 	if _, err := os.Stat(rcPath); err == nil {
 		fmt.Print("Delete remote vault too? (y/n): ")
-		resp, err := readLine("")
-		if err != nil {
-			return err
+		resp, readErr := readLine("")
+		if readErr != nil {
+			return readErr
 		}
+		deleteFailed := false
 		if resp == "y" {
-			rc, err := loadRemoteConfig()
-			if err == nil {
+			rc, cfgErr := loadRemoteConfig()
+			if cfgErr != nil {
+				fmt.Fprintln(os.Stderr, "Warning: could not load remote config:", cfgErr)
+				deleteFailed = true
+			} else {
 				accountResp, reqErr := doRequestWithRefresh("DELETE", apiURL(rc.ServerURL, "/account"), nil, rc)
-				if reqErr == nil {
+				if reqErr != nil {
+					fmt.Fprintln(os.Stderr, "Warning: remote delete request failed:", reqErr)
+					deleteFailed = true
+				} else {
 					accountResp.Body.Close()
 					if accountResp.StatusCode == http.StatusOK {
 						fmt.Println("Server account deleted")
+					} else {
+						fmt.Fprintf(os.Stderr, "Warning: server returned %d when deleting account\n", accountResp.StatusCode)
+						deleteFailed = true
 					}
 				}
 			}
 		}
 		if err := os.Remove(rcPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove remote config: %w", err)
+		}
+		if deleteFailed {
+			fmt.Fprintln(os.Stderr, "Remote data may still exist on the server.")
 		}
 	}
 

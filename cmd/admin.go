@@ -79,7 +79,7 @@ func runChangePassword() error {
 	return nil
 }
 
-// recoverVaultCmd recovers the vault on a new machine using a 12-word recovery phrase.
+// recoverVaultCmd recovers the vault on a new machine using a recovery phrase.
 var recoverVaultCmd = &cobra.Command{
 	Use:   "recover-vault",
 	Short: "Recover vault after machine change",
@@ -105,14 +105,14 @@ func runRecoverVault() error {
 		return kerr.ErrNoVault
 	}
 
-	phrase, err := readLine("Recovery phrase (12 words, space-separated): ")
+	phrase, err := readLine(fmt.Sprintf("Recovery phrase (%d words, space-separated): ", vault.PhraseWords))
 	if err != nil {
 		return err
 	}
 
 	entries, err := vault.LoadRecoveryWithCode(phrase)
 	if err != nil {
-		fmt.Println("Recovery failed: invalid phrase or vault format")
+		fmt.Println("Recovery failed:", err)
 		return err
 	}
 
@@ -151,7 +151,7 @@ func runGenerateRecovery() error {
 	}
 
 	fmt.Println()
-	fmt.Println("NEW RECOVERY PHRASE (12 words):")
+	fmt.Printf("NEW RECOVERY PHRASE (%d words):\n", vault.PhraseWords)
 	fmt.Println(code)
 	fmt.Println()
 	fmt.Println("Write this down and keep it safe. The old phrase is no longer valid.")

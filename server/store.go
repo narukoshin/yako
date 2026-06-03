@@ -218,34 +218,13 @@ func (s *Store) Register(username, password, inviteCode string) (*User, error) {
 		return nil, fmt.Errorf("password must be at least 8 characters")
 	}
 
-	hash, err := hashPassword(password)
-	if err != nil {
-		return nil, fmt.Errorf("register: %w", err)
-	}
-
-	id := make([]byte, 16)
-	if _, err := rand.Read(id); err != nil {
-		return nil, fmt.Errorf("register: %w", err)
-	}
-
-	user := &User{
-		ID:           hex.EncodeToString(id),
-		Username:     username,
-		PasswordHash: hash,
-		Role:         RoleUser,
-		Status:       StatusActive,
-		CreatedAt:    time.Now().UTC(),
-	}
-
 	users, err := s.LoadUsers()
 	if err != nil {
 		return nil, fmt.Errorf("register: %w", err)
 	}
 
-	for _, u := range users {
-		if u.Username == username {
-			return nil, fmt.Errorf("username already taken")
-		}
+	if err := checkUsernameUnique(users, username); err != nil {
+		return nil, err
 	}
 
 	codes, err := s.LoadInviteCodes()
@@ -253,25 +232,17 @@ func (s *Store) Register(username, password, inviteCode string) (*User, error) {
 		return nil, fmt.Errorf("register: %w", err)
 	}
 
-	var consumed bool
-	for i, c := range codes {
-		if c.Code == inviteCode {
-			if c.Used {
-				return nil, fmt.Errorf("invite code already used")
-			}
-			if time.Now().UTC().After(c.ExpiresAt) {
-				return nil, fmt.Errorf("invite code expired")
-			}
-			codes[i].Used = true
-			if err := s.saveInviteCodes(codes); err != nil {
-				return nil, fmt.Errorf("register: %w", err)
-			}
-			consumed = true
-			break
-		}
+	if err := consumeInviteCode(codes, inviteCode); err != nil {
+		return nil, err
 	}
-	if !consumed {
-		return nil, fmt.Errorf("invite code not found")
+
+	if err := s.saveInviteCodes(codes); err != nil {
+		return nil, fmt.Errorf("register: %w", err)
+	}
+
+	user, err := newUser(username, password)
+	if err != nil {
+		return nil, fmt.Errorf("register: %w", err)
 	}
 
 	users = append(users, *user)
@@ -280,6 +251,55 @@ func (s *Store) Register(username, password, inviteCode string) (*User, error) {
 	}
 
 	return user, nil
+}
+
+// checkUsernameUnique returns an error if the username already exists in the user list.
+func checkUsernameUnique(users []User, username string) error {
+	for _, u := range users {
+		if u.Username == username {
+			return fmt.Errorf("username already taken")
+		}
+	}
+	return nil
+}
+
+// consumeInviteCode validates and marks an invite code as used. Modifies codes in place.
+func consumeInviteCode(codes []InviteCode, code string) error {
+	for i, c := range codes {
+		if c.Code == code {
+			if c.Used {
+				return fmt.Errorf("invite code already used")
+			}
+			if time.Now().UTC().After(c.ExpiresAt) {
+				return fmt.Errorf("invite code expired")
+			}
+			codes[i].Used = true
+			return nil
+		}
+	}
+	return fmt.Errorf("invite code not found")
+}
+
+// newUser creates a User with a bcrypt-hashed password and a random ID.
+func newUser(username, password string) (*User, error) {
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return nil, err
+	}
+
+	return &User{
+		ID:           hex.EncodeToString(id),
+		Username:     username,
+		PasswordHash: hash,
+		Role:         RoleUser,
+		Status:       StatusActive,
+		CreatedAt:    time.Now().UTC(),
+	}, nil
 }
 
 // Authenticate verifies username/password against bcrypt hashes.

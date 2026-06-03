@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	ck "github.com/narukoshin/yako/v1/crypto"
+	"github.com/narukoshin/yako/v1/kerr"
 )
 
 // BIP39 recovery phrase parameters: 128 bits of entropy + 4 checksum bits = 132 bits → 15 words.
@@ -14,7 +15,8 @@ const (
 	recoveryEntropyBytes = 16
 	checksumBits         = 4
 	bitsPerWord          = 11
-	phraseWords          = (recoveryEntropyBytes*8 + checksumBits) / bitsPerWord
+	// PhraseWords is the number of words in a BIP39 recovery phrase (15 words).
+	PhraseWords = (recoveryEntropyBytes*8 + checksumBits) / bitsPerWord
 )
 
 // bip39Wordlist is the official BIP39 English wordlist. Exactly 2048 words, sorted
@@ -266,8 +268,8 @@ func GenerateRecoveryPhrase() (string, error) {
 	copy(buffer, entropy)
 	buffer[recoveryEntropyBytes] = checksum << (8 - checksumBits)
 
-	words := make([]string, phraseWords)
-	for i := range phraseWords {
+	words := make([]string, PhraseWords)
+	for i := range PhraseWords {
 		bitStart := i * bitsPerWord
 		byteStart := bitStart / 8
 		bitOffset := bitStart % 8
@@ -283,15 +285,15 @@ func GenerateRecoveryPhrase() (string, error) {
 // Validates word count and checksum — if it's wrong, you transcribed it wrong.
 func PhraseToEntropy(phrase string) ([]byte, error) {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(phrase)))
-	if len(words) != phraseWords {
-		return nil, fmt.Errorf("expected %d words, got %d", phraseWords, len(words))
+	if len(words) != PhraseWords {
+		return nil, fmt.Errorf("expected %d words, got %d: %w", PhraseWords, len(words), kerr.ErrInvalidWordCount)
 	}
 
-	indices := make([]uint16, phraseWords)
+	indices := make([]uint16, PhraseWords)
 	for i, w := range words {
 		idx, ok := wordIndex(w)
 		if !ok {
-			return nil, fmt.Errorf("unknown word: %q", w)
+			return nil, fmt.Errorf("unknown word %q: %w", w, kerr.ErrUnknownWord)
 		}
 		indices[i] = uint16(idx)
 	}
@@ -315,16 +317,17 @@ func PhraseToEntropy(phrase string) ([]byte, error) {
 	hash := sha256.Sum256(entropy)
 	expectedChecksum := hash[0] >> (8 - checksumBits)
 	if checksum != expectedChecksum {
-		return nil, fmt.Errorf("invalid checksum")
+		return nil, fmt.Errorf("recovery phrase checksum mismatch: %w", kerr.ErrChecksumMismatch)
 	}
 
 	return entropy, nil
 }
 
 // VerifyRecoveryCode checks if a recovery phrase decrypts the given vault data.
-func VerifyRecoveryCode(vaultData []byte, phrase string) bool {
+// Returns nil if the phrase is valid, or an error describing why it failed.
+func VerifyRecoveryCode(vaultData []byte, phrase string) error {
 	_, err := LoadRecoveryWithCodeData(vaultData, phrase)
-	return err == nil
+	return err
 }
 
 func init() {

@@ -91,64 +91,16 @@ func (m model) updateRemoteHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.remoteMsg = ""
 			return m.initRemoteForm(true), nil
 		case "p":
-			if m.remoteToken == "" {
-				m.remoteMsg = "not connected; login first"
-				return m, nil
-			}
-			var pushErr error
-			m, pushErr = m.remotePush()
-			if pushErr != nil {
-				m.remoteMsg = errStyle.Render(pushErr.Error())
-			} else {
-				m.remoteMsg = successStyle.Render("Vault pushed successfully")
-			}
-			return m, nil
+			return m.requireToken(m.handlePush)
 		case "g":
-			if m.remoteToken == "" {
-				m.remoteMsg = "not connected; login first"
-				return m, nil
-			}
-			var pullErr error
-			m, pullErr = m.remotePull()
-			if pullErr != nil {
-				m.remoteMsg = errStyle.Render(pullErr.Error())
-			} else {
-				m.remoteMsg = successStyle.Render("Vault pulled successfully")
-			}
-			return m, nil
+			return m.requireToken(m.handlePull)
 		case "o":
-			if m.remoteToken != "" {
-				remoteRequest("POST", apiURL(m.remoteURL, "/auth/logout"), m.remoteToken, nil)
-				if err := os.Remove(config.AppDir() + "/remote"); err != nil && !os.IsNotExist(err) {
-					m.remoteMsg = errStyle.Render(fmt.Sprintf("failed to remove saved credentials: %v", err))
-					return m, nil
-				}
-				m.remoteURL = ""
-				m.remoteToken = ""
-				m.remoteRefreshToken = ""
-				m.remoteUser = ""
-				m.remoteMsg = successStyle.Render("Logged out")
-			}
-			return m, nil
+			return m.handleLogout()
 		case "d":
-			if m.remoteToken == "" {
-				m.remoteMsg = "not connected; login first"
-				return m, nil
-			}
-			m.remoteConfirmDelVault = true
-			m.remoteMsg = errStyle.Render("Delete vault from server? (y/n)")
-			return m, nil
+			return m.requireToken(m.handleDeleteConfirm)
 		case "y":
 			if m.remoteConfirmDelVault {
-				m.remoteConfirmDelVault = false
-				var delErr error
-				m, delErr = m.remoteDeleteVault()
-				if delErr != nil {
-					m.remoteMsg = errStyle.Render(delErr.Error())
-				} else {
-					m.remoteMsg = successStyle.Render("Account and vault deleted from server")
-				}
-				return m, nil
+				return m.handleDeleteVaultConfirm()
 			}
 		}
 	}
@@ -159,6 +111,72 @@ func (m model) updateRemoteHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	return m, nil
+}
+
+// requireToken guards an action with a "not connected" message if no token is set.
+func (m model) requireToken(action func() (model, tea.Cmd)) (tea.Model, tea.Cmd) {
+	if m.remoteToken == "" {
+		m.remoteMsg = "not connected; login first"
+		return m, nil
+	}
+	return action()
+}
+
+func (m model) handlePush() (model, tea.Cmd) {
+	var pushErr error
+	m, pushErr = m.remotePush()
+	if pushErr != nil {
+		m.remoteMsg = errStyle.Render(pushErr.Error())
+	} else {
+		m.remoteMsg = successStyle.Render("Vault pushed successfully")
+	}
+	return m, nil
+}
+
+func (m model) handlePull() (model, tea.Cmd) {
+	var pullErr error
+	m, pullErr = m.remotePull()
+	if pullErr != nil {
+		m.remoteMsg = errStyle.Render(pullErr.Error())
+	} else {
+		m.remoteMsg = successStyle.Render("Vault pulled successfully")
+	}
+	return m, nil
+}
+
+func (m model) handleLogout() (model, tea.Cmd) {
+	if m.remoteToken == "" {
+		return m, nil
+	}
+	remoteRequest("POST", apiURL(m.remoteURL, "/auth/logout"), m.remoteToken, nil)
+	if err := os.Remove(config.AppDir() + "/remote"); err != nil && !os.IsNotExist(err) {
+		m.remoteMsg = errStyle.Render(fmt.Sprintf("failed to remove saved credentials: %v", err))
+		return m, nil
+	}
+	m.remoteURL = ""
+	m.remoteToken = ""
+	m.remoteRefreshToken = ""
+	m.remoteUser = ""
+	m.remoteMsg = successStyle.Render("Logged out")
+	return m, nil
+}
+
+func (m model) handleDeleteConfirm() (model, tea.Cmd) {
+	m.remoteConfirmDelVault = true
+	m.remoteMsg = errStyle.Render("Delete vault from server? (y/n)")
+	return m, nil
+}
+
+func (m model) handleDeleteVaultConfirm() (model, tea.Cmd) {
+	m.remoteConfirmDelVault = false
+	var delErr error
+	m, delErr = m.remoteDeleteVault()
+	if delErr != nil {
+		m.remoteMsg = errStyle.Render(delErr.Error())
+	} else {
+		m.remoteMsg = successStyle.Render("Account and vault deleted from server")
+	}
 	return m, nil
 }
 
@@ -174,63 +192,72 @@ func (m model) updateRemoteLogin(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		m.remoteInputs[m.remoteFocused].Blur()
-		m.remoteFocused = (m.remoteFocused + 1) % len(m.remoteInputs)
-		m.remoteInputs[m.remoteFocused].Focus()
-		return m, nil
+		return m.advanceFocus(1), nil
 
 	case tea.KeyShiftTab:
-		m.remoteInputs[m.remoteFocused].Blur()
-		m.remoteFocused = (m.remoteFocused - 1 + len(m.remoteInputs)) % len(m.remoteInputs)
-		m.remoteInputs[m.remoteFocused].Focus()
-		return m, nil
+		return m.advanceFocus(-1), nil
 
 	case tea.KeyEnter:
-		url := m.remoteInputs[0].Value()
-		user := m.remoteInputs[1].Value()
-		pass := m.remoteInputs[2].Value()
-		if url == "" || user == "" || pass == "" {
-			break
-		}
+		return m.submitRemoteForm()
 
-		var (
-			token        string
-			refreshToken string
-			err          error
-		)
-		if m.remoteRegister {
-			code := m.remoteInputs[3].Value()
-			if code == "" {
-				break
-			}
-			token, refreshToken, err = remoteRegister(url, user, pass, code)
-		} else {
-			token, refreshToken, err = remoteLogin(url, user, pass)
-		}
-		if err != nil {
-			m.remoteMsg = errStyle.Render(err.Error())
-			return m, nil
-		}
+	default:
+		var cmd tea.Cmd
+		m.remoteInputs[m.remoteFocused], cmd = m.remoteInputs[m.remoteFocused].Update(msg)
+		return m, cmd
+	}
+}
 
-		m.remoteURL = url
-		m.remoteToken = token
-		m.remoteRefreshToken = refreshToken
-		m.remoteUser = user
-		m.remoteInputs = nil
-		action := "Connected"
-		if m.remoteRegister {
-			action = "Registered and connected"
-		}
-		m.remoteMsg = successStyle.Render(fmt.Sprintf("%s as %s", action, user))
-		if err := m.saveRemoteToken(); err != nil {
-			m.remoteMsg = errStyle.Render(fmt.Sprintf("Connected but failed to save credentials: %v", err))
-		}
+// advanceFocus moves the focus by delta (+1 or -1), wrapping around the input fields.
+func (m model) advanceFocus(delta int) model {
+	m.remoteInputs[m.remoteFocused].Blur()
+	count := len(m.remoteInputs)
+	m.remoteFocused = (m.remoteFocused + delta + count) % count
+	m.remoteInputs[m.remoteFocused].Focus()
+	return m
+}
+
+// submitRemoteForm handles the login or register form submission.
+func (m model) submitRemoteForm() (tea.Model, tea.Cmd) {
+	url := m.remoteInputs[0].Value()
+	user := m.remoteInputs[1].Value()
+	pass := m.remoteInputs[2].Value()
+	if url == "" || user == "" || pass == "" {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.remoteInputs[m.remoteFocused], cmd = m.remoteInputs[m.remoteFocused].Update(msg)
-	return m, cmd
+	var (
+		token        string
+		refreshToken string
+		err          error
+	)
+	if m.remoteRegister {
+		code := m.remoteInputs[3].Value()
+		if code == "" {
+			return m, nil
+		}
+		token, refreshToken, err = remoteRegister(url, user, pass, code)
+	} else {
+		token, refreshToken, err = remoteLogin(url, user, pass)
+	}
+	if err != nil {
+		m.remoteMsg = errStyle.Render(err.Error())
+		return m, nil
+	}
+
+	m.remoteURL = url
+	m.remoteToken = token
+	m.remoteRefreshToken = refreshToken
+	m.remoteUser = user
+	m.remoteInputs = nil
+	action := "Connected"
+	if m.remoteRegister {
+		action = "Registered and connected"
+	}
+	m.remoteMsg = successStyle.Render(fmt.Sprintf("%s as %s", action, user))
+	if err := m.saveRemoteToken(); err != nil {
+		m.remoteMsg = errStyle.Render(fmt.Sprintf("Connected but failed to save credentials: %v", err))
+	}
+	return m, nil
 }
 
 // viewRemote renders either the login form or the home screen depending on whether inputs are active.
@@ -312,6 +339,28 @@ func (m model) viewRemoteLogin() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
 
+// doAuthRequest performs an authenticated HTTP request, automatically refreshing the token
+// on a 401 response.
+func (m model) doAuthRequest(method, url string, body []byte) (*http.Response, model, error) {
+	resp, err := remoteRequest(method, url, m.remoteToken, body)
+	if err != nil {
+		return nil, m, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized && m.remoteRefreshToken != "" {
+		resp.Body.Close()
+		m, err = m.refreshAccessToken()
+		if err != nil {
+			return nil, m, err
+		}
+		resp, err = remoteRequest(method, url, m.remoteToken, body)
+		if err != nil {
+			return nil, m, err
+		}
+	}
+	return resp, m, nil
+}
+
 // remotePush uploads the local vault file to the server; retries with a refreshed token on 401.
 func (m model) remotePush() (model, error) {
 	data, err := os.ReadFile(config.VaultPath())
@@ -319,21 +368,9 @@ func (m model) remotePush() (model, error) {
 		return m, fmt.Errorf("read vault: %w", err)
 	}
 
-	resp, err := remoteRequest("PUT", apiURL(m.remoteURL, "/vault"), m.remoteToken, data)
+	resp, m, err := m.doAuthRequest("PUT", apiURL(m.remoteURL, "/vault"), data)
 	if err != nil {
 		return m, fmt.Errorf("push: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized && m.remoteRefreshToken != "" {
-		resp.Body.Close()
-		m, err = m.refreshAccessToken()
-		if err != nil {
-			return m, err
-		}
-		resp, err = remoteRequest("PUT", apiURL(m.remoteURL, "/vault"), m.remoteToken, data)
-		if err != nil {
-			return m, fmt.Errorf("push: %w", err)
-		}
 	}
 	defer resp.Body.Close()
 
@@ -349,21 +386,9 @@ func (m model) remotePull() (model, error) {
 	localEntries := make([]vault.Entry, len(m.entries))
 	copy(localEntries, m.entries)
 
-	resp, err := remoteRequest("GET", apiURL(m.remoteURL, "/vault"), m.remoteToken, nil)
+	resp, m, err := m.doAuthRequest("GET", apiURL(m.remoteURL, "/vault"), nil)
 	if err != nil {
 		return m, fmt.Errorf("pull: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized && m.remoteRefreshToken != "" {
-		resp.Body.Close()
-		m, err = m.refreshAccessToken()
-		if err != nil {
-			return m, err
-		}
-		resp, err = remoteRequest("GET", apiURL(m.remoteURL, "/vault"), m.remoteToken, nil)
-		if err != nil {
-			return m, fmt.Errorf("pull: %w", err)
-		}
 	}
 	defer resp.Body.Close()
 
@@ -405,21 +430,9 @@ func (m model) remotePull() (model, error) {
 
 // remoteDeleteVault deletes the user's account and vault from the server and clears local saved credentials.
 func (m model) remoteDeleteVault() (model, error) {
-	resp, err := remoteRequest("DELETE", apiURL(m.remoteURL, "/account"), m.remoteToken, nil)
+	resp, m, err := m.doAuthRequest("DELETE", apiURL(m.remoteURL, "/account"), nil)
 	if err != nil {
 		return m, fmt.Errorf("delete account: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized && m.remoteRefreshToken != "" {
-		resp.Body.Close()
-		m, err = m.refreshAccessToken()
-		if err != nil {
-			return m, err
-		}
-		resp, err = remoteRequest("DELETE", apiURL(m.remoteURL, "/account"), m.remoteToken, nil)
-		if err != nil {
-			return m, fmt.Errorf("delete account: %w", err)
-		}
 	}
 	defer resp.Body.Close()
 

@@ -503,18 +503,15 @@ func runRemoteRegister(serverURL string) error {
 		return kerr.CleanHTTPError("register", resp.StatusCode, respBody)
 	}
 
-	var result struct {
-		Token        string `json:"token"`
-		RefreshToken string `json:"refresh_token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	token, refreshToken, err := parseTokenResponse(resp.Body)
+	if err != nil {
 		return fmt.Errorf("parse response: %w", err)
 	}
 
 	rc := &remoteConfig{
 		ServerURL:    serverURL,
-		Token:        result.Token,
-		RefreshToken: result.RefreshToken,
+		Token:        token,
+		RefreshToken: refreshToken,
 		Username:     username,
 	}
 	if err := saveRemoteConfig(rc); err != nil {
@@ -523,6 +520,18 @@ func runRemoteRegister(serverURL string) error {
 
 	fmt.Println("Registered and logged in successfully")
 	return nil
+}
+
+// parseTokenResponse decodes a JSON body with token and refresh_token fields.
+func parseTokenResponse(r io.Reader) (token, refreshToken string, err error) {
+	var result struct {
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r).Decode(&result); err != nil {
+		return "", "", err
+	}
+	return result.Token, result.RefreshToken, nil
 }
 
 // runRemotePush encrypts and uploads the vault file to the remote server.
@@ -597,6 +606,12 @@ func runRemotePull() error {
 		return runRemotePullRecovery(data)
 	}
 
+	return pullInstallVault(data)
+}
+
+// pullInstallVault writes downloaded vault data to a temp file, then merges with the local
+// vault (if it exists) or replaces it entirely.
+func pullInstallVault(data []byte) error {
 	if err := os.MkdirAll(config.AppDir(), 0700); err != nil {
 		return err
 	}
@@ -648,24 +663,28 @@ func runRemotePullRecovery(data []byte) error {
 		return err
 	}
 
-	var serverEntries []vault.Entry
+	serverEntries, err := recoverServerEntries(rc, data)
+	if err != nil {
+		return err
+	}
+
+	return installRecoveredEntries(serverEntries)
+}
+
+// recoverServerEntries prompts for recovery phrase up to 3 times, verifies against the server,
+// and returns decrypted entries on success. The server destroys the vault after 3 failures.
+func recoverServerEntries(rc *remoteConfig, data []byte) ([]vault.Entry, error) {
 	for attempt := 1; attempt <= 3; attempt++ {
-		phrase, err := readLine("Recovery phrase (12 words, space-separated): ")
+		phrase, err := readLine(fmt.Sprintf("Recovery phrase (%d words, space-separated): ", vault.PhraseWords))
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		resp, err := doRequestWithRefresh("POST", apiURL(rc.ServerURL, "/recover"),
 			[]byte(`{"phrase":"`+phrase+`"}`), rc)
-		// Zero the phrase in the request buffer
-		for i := 0; i < len(phrase) && i < 512; i++ {
-			phraseBytes := []byte(phrase)
-			for j := range phraseBytes {
-				phraseBytes[j] = 0
-			}
-		}
+		zeroString(phrase)
 		if err != nil {
-			return fmt.Errorf("recover request: %w", err)
+			return nil, fmt.Errorf("recover request: %w", err)
 		}
 
 		var result struct {
@@ -678,12 +697,12 @@ func runRemotePullRecovery(data []byte) error {
 
 		switch result.Status {
 		case "ok":
-			serverEntries, err = vault.LoadRecoveryWithCodeData(data, phrase)
+			entries, err := vault.LoadRecoveryWithCodeData(data, phrase)
 			if err != nil {
-				return fmt.Errorf("decrypt vault: %w", err)
+				return nil, fmt.Errorf("decrypt vault: %w", err)
 			}
 			fmt.Println("(Stops pouting and looks at you with a tiny smile)")
-			goto merge
+			return entries, nil
 		case "invalid":
 			if attempt < 3 {
 				fmt.Println(result.Message)
@@ -692,13 +711,15 @@ func runRemotePullRecovery(data []byte) error {
 		case "destroyed":
 			fmt.Println(result.Message)
 			fmt.Println("(Grabs her hair in frustration before finally letting go of the vault)")
-			return fmt.Errorf("vault destroyed on server after 3 failed recovery attempts")
+			return nil, fmt.Errorf("vault destroyed on server after 3 failed recovery attempts")
 		}
 	}
+	return nil, fmt.Errorf("recovery failed")
+}
 
-	return fmt.Errorf("recovery failed")
-
-merge:
+// installRecoveredEntries merges recovered server entries with the local vault if it exists,
+// or creates a new vault with a new password.
+func installRecoveredEntries(serverEntries []vault.Entry) error {
 	if vault.Exists() {
 		pw, entries, err := unlockVault()
 		if err != nil {
@@ -724,6 +745,16 @@ merge:
 		fmt.Println("Recovery code was NOT transferred. Run 'yako config generate-recovery' to create a new one.")
 	}
 	return nil
+}
+
+// zeroString overwrites the contents of s with zeroes for the first 512 bytes.
+func zeroString(s string) {
+	for i := 0; i < len(s) && i < 512; i++ {
+		b := []byte(s)
+		for j := range b {
+			b[j] = 0
+		}
+	}
 }
 
 // runRemoteLogout invalidates the token on the server and removes local credentials (and optionally admin cache).
